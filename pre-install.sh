@@ -10,11 +10,11 @@ set -xeuo pipefail # Make people's life easier
 # -------------------
 
 SCRIPT_DIR=$PWD
-REPO_URL="https://github.com/immich-app/base-images"
 BASE_IMG_REPO_DIR=$SCRIPT_DIR/base-images
 SOURCE_DIR=$SCRIPT_DIR/image-source
 LD_LIBRARY_PATH=/usr/local/lib # :$LD_LIBRARY_PATH
 LD_RUN_PATH=/usr/local/lib # :$LD_RUN_PATH
+
 
 # -------------------
 # Git clone function
@@ -60,7 +60,6 @@ install_runtime_component () {
         redis
 }
 
-install_runtime_component
 
 # -------------------
 # Install build dependency
@@ -102,11 +101,24 @@ install_build_dependency () {
         wget \
         zlib1g \
         cpanminus
-        
 
-    ## Learned from compile failure
-    apt install -y libtool liblcms2-dev libgif-dev libpango1.0-dev
-    
+    # Install for imagick
+    apt-get install --no-install-recommends -y\
+        libtool \
+        liblcms2-dev \
+        libgif-dev \
+        libpango1.0-dev \
+        libjpeg-dev \
+        libpng-dev \
+        libtiff-dev \
+        libwebp-dev \
+        liblcms2-dev \
+        libxml2-dev \
+        libfftw3-dev \
+        libopenexr-dev \
+        libzip-dev \
+        libde265-dev 
+
     # Check the ID and execute the corresponding script
     case "$ID" in
         ubuntu)
@@ -145,7 +157,6 @@ install_build_dependency () {
     esac
 }
 
-install_build_dependency
 
 # -------------------
 # Install ffmpeg automatically
@@ -167,8 +178,6 @@ install_ffmpeg () {
     fi
 
 }
-
-install_ffmpeg
 
 
 # -------------------
@@ -198,14 +207,6 @@ install_postgresql () {
     runuser -u postgres -- psql -c 'CREATE EXTENSION IF NOT EXISTS vchord CASCADE'
 }
 
-install_postgresql
-
-# -------------------
-# Clone the base images repo
-# -------------------
-
-git_clone $REPO_URL $BASE_IMG_REPO_DIR main
-
 # -------------------
 # Change lock file permission
 # -------------------
@@ -215,7 +216,6 @@ change_permission () {
     chmod 666 $BASE_IMG_REPO_DIR/server/sources/*.json
 }
 
-change_permission
 
 # -------------------
 # Setup folders
@@ -229,7 +229,6 @@ setup_folders () {
     fi
 }
 
-setup_folders
 
 # -------------------
 # Change locale
@@ -240,7 +239,6 @@ change_locale () {
     locale-gen
 }
 
-change_locale
 
 # -------------------
 # Build libjxl
@@ -306,7 +304,6 @@ build_libjxl () {
     rm -rf $SOURCE/third_party/
 }
 
-build_libjxl
 
 # -------------------
 # Build libheif
@@ -347,7 +344,6 @@ build_libheif () {
     remove_build_folder $SOURCE
 }
 
-build_libheif
 
 # -------------------
 # Build libraw
@@ -377,7 +373,6 @@ build_libraw () {
     make clean
 }
 
-build_libraw
 
 # -------------------
 # Build image magick
@@ -396,17 +391,19 @@ build_image_magick () {
 
     cd $SOURCE
 
-    ./configure --with-modules
+    ./configure --with-raw --with-modules
     echo "Building ImageMagick using $(nproc) threads"
     make -j"$(nproc)"
     make install
     ldconfig /usr/local/lib
+    
+    # Check
+    ldd $(which magick) | grep libraw
 
     # Clean up builds
     make clean
 }
 
-build_image_magick
 
 # -------------------
 # Build libvips
@@ -438,7 +435,6 @@ build_libvips () {
     remove_build_folder $SOURCE
 }
 
-build_libvips
 
 # -------------------
 # Remove build dependency
@@ -459,6 +455,21 @@ remove_build_dependency () {
         libhwy-dev \
         libwebp-dev \
         libio-compress-brotli-perl
+    apt-get remove -y \
+        libtool \
+        liblcms2-dev \
+        libgif-dev \
+        libpango1.0-dev \
+        libjpeg-dev \
+        libpng-dev \
+        libtiff-dev \
+        libwebp-dev \
+        liblcms2-dev \
+        libxml2-dev \
+        libfftw3-dev \
+        libopenexr-dev \
+        libzip-dev \
+        libde265-dev 
 }
 
 # remove_build_dependency
@@ -499,4 +510,18 @@ add_runtime_dependency () {
         libhwy1t64
 }
 
+
+
+install_runtime_component
+install_build_dependency
+install_ffmpeg
+install_postgresql
+change_permission
+setup_folders
+change_locale
+build_libjxl
+build_libheif
+build_libraw
+build_image_magick
+build_libvips
 add_runtime_dependency

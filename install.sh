@@ -1,6 +1,5 @@
 #!/bin/bash
 
-set -xeuo pipefail # Make people's life easier
 
 # -------------------
 # Check current user
@@ -13,7 +12,6 @@ check_user_id () {
     fi
 }
 
-check_user_id
 
 # -------------------
 # Create env file if it does not exists
@@ -36,7 +34,6 @@ create_install_env_file () {
     fi
 }
 
-create_install_env_file
 
 # -------------------
 # Load environment variables from env file
@@ -50,13 +47,26 @@ load_environment_variables () {
     set +a
 }
 
-load_environment_variables
+
+# -------------------
+# Common variables
+# -------------------
+set_common_variables () {
+    set -a
+    INSTALL_DIR_src=$INSTALL_DIR/source
+    INSTALL_DIR_app=$INSTALL_DIR/app
+    INSTALL_DIR_ml=$INSTALL_DIR_app/machine-learning
+    INSTALL_DIR_geo=$INSTALL_DIR/geodata
+    TMP_DIR=/tmp/$(whoami)/immich-in-lxc/
+    REPO_URL="https://github.com/immich-app/immich"
+    set +a
+}
+
 
 # -------------------
 # Review environment variables
 # -------------------
 
-set +x
 review_install_information () {
     # Install Version
     echo $REPO_TAG
@@ -74,7 +84,6 @@ review_install_information () {
     echo $PROXY_POETRY
 }
 
-review_install_information
 
 # -------------------
 # Check if node are installed
@@ -103,7 +112,6 @@ install_node () {
     echo "pnpm version: {$(pnpm -v)}"
 }
 
-install_node
 
 # -------------------
 # Check if dependency are met
@@ -146,33 +154,6 @@ review_dependency () {
     echo "Dependency check passed!"
 }
 
-review_dependency
-
-set -xeuo pipefail
-
-# -------------------
-# Common variables
-# -------------------
-
-INSTALL_DIR_src=$INSTALL_DIR/source
-INSTALL_DIR_app=$INSTALL_DIR/app
-INSTALL_DIR_ml=$INSTALL_DIR_app/machine-learning
-INSTALL_DIR_geo=$INSTALL_DIR/geodata
-TMP_DIR=/tmp/$(whoami)/immich-in-lxc/
-REPO_URL="https://github.com/immich-app/immich"
-MAJOR_VERSION=$(echo $REPO_TAG | cut -d'.' -f1) # No longer used, but might worth keeping it around
-MINOR_VERSION=$(echo $REPO_TAG | cut -d'.' -f2) # No longer used, but might worth keeping it around
-
-# The idea is that when one needs to sets up a proxy for NPM, 
-# they might not have good access to GitHub
-# Thus, build from source would be faster
-# Add --build-from-source in npm ci is the solution if node-pre-gyp stuck at GET http https://github.com.....
-# Lastly, printing out build process looks cool :)
-if [ -n "$PROXY_NPM" ]; then
-  isNPM_BUILD_FROM_SOURCE="true"
-else
-  isNPM_BUILD_FROM_SOURCE="false"
-fi
 
 
 # -------------------
@@ -180,10 +161,10 @@ fi
 # -------------------
 
 clean_previous_build () {
+    confirm_destruction "$INSTALL_DIR_app"
     rm -rf $INSTALL_DIR_app
 }
 
-clean_previous_build
 
 # -------------------
 # Common variables
@@ -211,7 +192,6 @@ create_folders () {
     mkdir -p $TMP_DIR
 }
 
-create_folders
 
 # -------------------
 # Clone the main repo
@@ -234,7 +214,6 @@ clone_the_repo () {
     git checkout $REPO_TAG
 }
 
-clone_the_repo
 
 # -------------------
 # Install immich-web-server
@@ -255,6 +234,9 @@ install_immich_web_server_pnpm () {
     npm_config_sharp_binary_host="" SHARP_FORCE_GLOBAL_LIBVIPS=true pnpm install
 
     pnpm --filter immich --frozen-lockfile build
+    # Fix for Unsupported compression heifsave
+    rm -r $INSTALL_DIR_src/node_modules/.pnpm/sharp@*
+    npm install --no-save --build-from-source --verbose sharp
     pnpm --filter @immich/sdk --filter immich-web --frozen-lockfile build
     # Build and deploy the server component.
     pnpm --filter immich --prod deploy $INSTALL_DIR_app
@@ -278,69 +260,6 @@ install_immich_web_server_pnpm () {
 }
 
 
-install_immich_web_server () {
-    cd $INSTALL_DIR_src
-
-    # Set mirror for npm
-    if [ ! -z "${PROXY_NPM}" ]; then
-        npm config set registry=$PROXY_NPM
-    fi
-    # Set mirror for npm dist
-    if [ ! -z "${PROXY_NPM_DIST}" ]; then
-        export npm_config_dist_url=$PROXY_NPM_DIST
-    fi
-    # Set npm args
-    if $isNPM_BUILD_FROM_SOURCE; then
-        npm_args="--build-from-source --verbose --foreground-script"
-    else
-        npm_args=""
-    fi
-
-    # This solves fallback-to-build issue with bcrypt and utimes
-    npm install -g node-gyp @mapbox/node-pre-gyp
-    # Solve audit stuck by skipping it, [Additional info](https://overreacted.io/npm-audit-broken-by-design/)
-    # npm config set audit false
-    # Install immich cli
-    npm i -g @immich/cli
-
-    cd server
-    npm ci $npm_args # --cpu x64 --os linux
-    # From immich-app/server/Dockerfile line 7
-    rm -rf $INSTALL_DIR_app/node_modules/@img/sharp-libvips*
-    rm -rf $INSTALL_DIR_app/node_modules/@img/sharp-linuxmusl-x64
-    # Install non-trivial dependency
-    npm i exiftool-vendored.pl
-    npm run build
-    npm prune --omit=dev --omit=optional
-    cd ..
-
-    cd open-api/typescript-sdk
-    npm ci $npm_args # --cpu x64 --os linux
-    npm run build
-    cd ../..
-
-    cd web
-    npm ci $npm_args # --cpu x64 --os linux
-    npm run build
-    cd ..
-
-    # Unset mirror for npm
-    if [ ! -z "${PROXY_NPM}" ]; then
-        npm config delete registry
-    fi
-
-    cp -a server/node_modules server/dist server/bin $INSTALL_DIR_app/
-    cp -a web/build $INSTALL_DIR_app/www
-    cp -a server/resources server/package.json server/package-lock.json $INSTALL_DIR_app/
-    cp -a server/bin/get-cpus.sh server/bin/start.sh $INSTALL_DIR_app/
-    cp -a LICENSE $INSTALL_DIR_app/
-    cp -a i18n $INSTALL_DIR/
-    cp -a open-api/typescript-sdk $INSTALL_DIR_app/
-    cd ..
-}
-
-install_immich_web_server_pnpm
-
 # -------------------
 # Generate build-lock
 # -------------------
@@ -348,6 +267,19 @@ install_immich_web_server_pnpm
 generate_build_lock () {
     # So that immich would not complain
     cd $SCRIPT_DIR
+
+    REPO_URL_BASE_IMG="https://github.com/immich-app/base-images"
+
+    tag=$(grep -oP '(?<=immich-app/base-server-dev:)[0-9]+' $INSTALL_DIR_app/Dockerfile)
+
+    if [ -d base-images/.git ]; then
+        echo "Updating existing base-images repo..."
+        git -C base-images fetch --tags
+        git -C base-images checkout "$tag" || git -C base-images fetch origin "refs/tags/$tag:refs/tags/$tag" && git -C base-images checkout "$tag"
+    else
+        echo "Cloning fresh base-images repo at tag $tag..."
+        git clone --branch "$tag" --depth 1 "$REPO_URL_BASE_IMG"
+    fi
 
     cd base-images/server/
 
@@ -361,7 +293,6 @@ generate_build_lock () {
         > $INSTALL_DIR_app/build-lock.json
 }
 
-generate_build_lock
 
 # -------------------
 # Install Immich-machine-learning
@@ -425,7 +356,6 @@ install_immich_machine_learning () {
     cp -a machine-learning/ann machine-learning/immich_ml $INSTALL_DIR_ml/
 }
 
-install_immich_machine_learning
 
 # -------------------
 # Replace /usr/src
@@ -444,38 +374,6 @@ replace_usr_src () {
     grep -RlE "\"/build\"|'/build'" | xargs -n1 sed -i -e "s@\"/build\"@\"$INSTALL_DIR_app\"@g" -e "s@'/build'@'$INSTALL_DIR_app'@g"
 }
 
-replace_usr_src
-
-# -------------------
-# Install sharp and CLI
-# -------------------
-
-install_sharp_and_cli () {
-    cd $INSTALL_DIR_app
-
-    # Set mirror for npm
-    if [ ! -z "${PROXY_NPM}" ]; then
-        npm config set registry=$PROXY_NPM
-    fi
-    # Set npm args
-    if $isNPM_BUILD_FROM_SOURCE; then
-        npm_args="--verbose --foreground-script"
-    else
-        npm_args=""
-    fi
-
-    npm install --build-from-source $npm_args sharp
-
-    # Remove sharp dependency so that it use system library
-
-
-    # Unset mirror for npm
-    if [ ! -z "${PROXY_NPM}" ]; then
-        npm config delete registry
-    fi
-}
-
-# install_sharp_and_cli
 
 # -------------------
 # Setup upload directory
@@ -486,7 +384,6 @@ setup_upload_folder () {
     ln -s $UPLOAD_DIR $INSTALL_DIR_ml/upload
 }
 
-setup_upload_folder
 
 # -------------------
 # Download GeoNames
@@ -512,7 +409,6 @@ download_geonames () {
     ln -s $INSTALL_DIR_geo $INSTALL_DIR_app/
 }
 
-download_geonames
 
 # -------------------
 # Create custom start.sh script
@@ -562,7 +458,6 @@ EOF
     chmod 775 $INSTALL_DIR_ml/start.sh
 }
 
-create_custom_start_script
 
 # -------------------
 # Create runtime environment file
@@ -583,8 +478,56 @@ create_runtime_env_file () {
     fi
 }
 
-create_runtime_env_file
 
 echo "----------------------------------------------------------------"
 echo "Done. Please install the systemd services to start using Immich."
 echo "----------------------------------------------------------------"
+
+
+# -------------------
+# Helper function that checks user consent
+# -------------------
+
+confirm_destruction() {
+    local target="${1:-}"
+
+    if [[ -z "$target" ]]; then
+        echo "Error: no target path provided to confirm_destruction()" >&2
+        exit 1
+    fi
+
+    echo "⚠️  WARNING: This operation would permanently DELETE everything under:"
+    echo "    $target"
+    echo
+    read -rp "Are you sure you want to continue? Type 'Y' to proceed: " confirm
+
+    if [[ "$confirm" != "Y" ]]; then
+        echo "Aborted. Nothing will be deleted."
+        exit 1
+    fi
+    return 0
+}
+
+
+set -xeuo pipefail # Make people's life easier
+
+
+check_user_id
+create_install_env_file
+load_environment_variables
+set_common_variables
+review_install_information
+install_node
+set +x
+review_dependency
+clean_previous_build
+create_folders
+clone_the_repo
+install_immich_web_server_pnpm
+generate_build_lock
+install_immich_machine_learning
+replace_usr_src
+setup_upload_folder
+download_geonames
+create_custom_start_script
+create_runtime_env_file
