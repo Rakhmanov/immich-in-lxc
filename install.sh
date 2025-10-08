@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# -------------------
+# Include helper functions
+# Such as git git_checkout_repo
+# -------------------
+source "./helpers.sh"
 
 # -------------------
 # Check current user
@@ -191,28 +196,6 @@ create_folders () {
 
 
 # -------------------
-# Clone the main repo
-# -------------------
-
-clone_the_repo () {
-    if [ ! -d "$INSTALL_DIR_src" ]; then
-        git clone "$REPO_URL" "$INSTALL_DIR_src" --single-branch
-        cd $INSTALL_DIR_src
-    else
-        cd $INSTALL_DIR_src
-        # REMOVE all the change one made to source repo, which is sth not supposed to happen
-        git reset --hard main
-        # In case one is not on the branch
-        git checkout main
-        # Get updates
-        git pull
-    fi
-    # Set the install version
-    git checkout $REPO_TAG
-}
-
-
-# -------------------
 # Install immich-web-server
 # -------------------
 
@@ -277,7 +260,7 @@ generate_build_lock () {
         git -C base-images checkout "$tag" || git -C base-images fetch origin "refs/tags/$tag:refs/tags/$tag" && git -C base-images checkout "$tag"
     else
         echo "Cloning fresh base-images repo at tag $tag..."
-        git clone --branch "$tag" --depth 1 "$REPO_URL_BASE_IMG"
+        safe_git_checkout "$REPO_URL_BASE_IMG" . "$tag"
     fi
 
     cd base-images/server/
@@ -519,9 +502,9 @@ set +x
 review_dependency
 clean_previous_build
 create_folders
-clone_the_repo
+safe_git_checkout "$REPO_URL" "$INSTALL_DIR_src" "$REPO_TAG"
 install_immich_web_server_pnpm
-generate_build_lock
+# generate_build_lock <- I dont know if we stil need it I havent had immich complaining
 install_immich_machine_learning
 replace_usr_src
 setup_upload_folder

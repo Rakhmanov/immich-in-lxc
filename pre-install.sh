@@ -1,34 +1,26 @@
 #!/bin/bash
 
 # -------------------
-# Git clone function
+# Include helper functions
+# Such as git safe_git_checkout, set_user_to_run
 # -------------------
+source "./helpers.sh"
 
-git_clone () {
-    # $1 = repo URL
-    # $2 = target dir
-    # $3 = branch name
 
-    if [ ! -d "$2/.git" ]; then
-        echo "Cloning $1 -> $2 (branch: $3)"
-        git clone --depth 1 --branch "$3" "$1" "$2" || {
-            echo "Branch $3 not found, cloning default branch..."
-            git clone "$1" "$2"
-        }
-    fi
-
-    git config --global --add safe.directory "$2"
-    cd "$2" || exit 1
-
-    # Ensure refs are up to date
-    git fetch origin "$3" --depth=1 || git fetch origin --unshallow
-
-    # Verify the branch ref exists remotely
-    if git show-ref --verify --quiet "refs/remotes/origin/$3"; then
-        git checkout -B "$3" "origin/$3"
-    else
-        echo "Warning: branch '$3' not found in remote, staying on current HEAD"
-    fi
+# -------------------
+# Common variables
+# -------------------
+set_common_variables () {
+    set -a
+    SCRIPT_DIR=$PWD
+    REPO_URL="https://github.com/immich-app/base-images"
+    APP_REPO_URL="https://github.com/immich-app/immich"
+    BASE_IMG_REPO_DIR=$SCRIPT_DIR/base-images
+    SOURCE_DIR=$SCRIPT_DIR/image-source
+    LD_LIBRARY_PATH=/usr/local/lib # :$LD_LIBRARY_PATH
+    LD_RUN_PATH=/usr/local/lib # :c$LD_RUN_PATH
+    set_user_to_run # Sets $USER_TO_RUN
+    set +a
 }
 
 
@@ -229,6 +221,7 @@ setup_folders () {
     if [ ! -d "$SOURCE_DIR" ]; then
         mkdir $SOURCE_DIR
     fi
+    sudo chown -R $USER_TO_RUN:$USER_TO_RUN $SOURCE_DIR
 }
 
 
@@ -260,7 +253,7 @@ build_libjxl () {
     : "${LIBJXL_REVISION:=$(jq -cr '.revision' $BASE_IMG_REPO_DIR/server/sources/libjxl.json)}"
     set +e
 
-    git_clone https://github.com/libjxl/libjxl.git $SOURCE $LIBJXL_REVISION
+    safe_git_checkout https://github.com/libjxl/libjxl.git $SOURCE $LIBJXL_REVISION
 
     cd $SOURCE
 
@@ -320,7 +313,7 @@ build_libheif () {
     : "${LIBHEIF_REVISION:=$(jq -cr '.revision' $BASE_IMG_REPO_DIR/server/sources/libheif.json)}"
     set +e
 
-    git_clone https://github.com/strukturag/libheif.git $SOURCE $LIBHEIF_REVISION
+    safe_git_checkout https://github.com/strukturag/libheif.git $SOURCE $LIBHEIF_REVISION
 
     cd $SOURCE
 
@@ -351,21 +344,25 @@ build_libheif () {
 # Build libraw
 # -------------------
 
-build_libraw () {
-    cd $SCRIPT_DIR
+build_libraw() {
+    cd "$SCRIPT_DIR"
 
-    SOURCE=$SOURCE_DIR/libraw
+    SOURCE="$SOURCE_DIR/libraw"
 
     set -e
-    : "${LIBRAW_REVISION:=$(jq -cr '.revision' $BASE_IMG_REPO_DIR/server/sources/libraw.json)}"
+    : "${LIBRAW_REVISION:=$(jq -cr '.revision' "$BASE_IMG_REPO_DIR/server/sources/libraw.json")}"
     set +e
 
-    git_clone https://github.com/libraw/libraw.git $SOURCE $LIBRAW_REVISION
+    safe_git_checkout "https://github.com/libraw/libraw.git" "$SOURCE" "$LIBRAW_REVISION"
 
-    cd $SOURCE
-
+    cd "$SOURCE"
     autoreconf --install
-    ./configure
+
+    # Create an out-of-source build directory
+    mkdir -p build
+    cd build
+
+    ../configure
     echo "Building libraw using $(nproc) threads"
     make -j"$(nproc)"
     make install
@@ -373,7 +370,10 @@ build_libraw () {
 
     # Clean up builds
     make clean
+    cd ..
+    remove_build_folder "$SOURCE"
 }
+
 
 
 # -------------------
@@ -389,7 +389,7 @@ build_image_magick () {
     : "${IMAGEMAGICK_REVISION:=$(jq -cr '.revision' $BASE_IMG_REPO_DIR/server/sources/imagemagick.json)}"
     set +e
 
-    git_clone https://github.com/ImageMagick/ImageMagick.git $SOURCE $IMAGEMAGICK_REVISION
+    safe_git_checkout https://github.com/ImageMagick/ImageMagick.git $SOURCE $IMAGEMAGICK_REVISION
 
     cd $SOURCE
 
@@ -421,7 +421,7 @@ build_libvips () {
     : "${LIBVIPS_REVISION:=$(jq -cr '.revision' $BASE_IMG_REPO_DIR/server/sources/libvips.json)}"
     set +e
 
-    git_clone https://github.com/libvips/libvips.git $SOURCE $LIBVIPS_REVISION
+    safe_git_checkout https://github.com/libvips/libvips.git $SOURCE $LIBVIPS_REVISION
 
     cd $SOURCE
     
@@ -508,22 +508,11 @@ add_runtime_dependency () {
         libhwy1t64
 }
 
+
 set -xeuo pipefail # Make people's life easier
 
-# -------------------
-# Common variables
-# -------------------
-
-SCRIPT_DIR=$PWD
-REPO_URL="https://github.com/immich-app/base-images"
-APP_REPO_URL="https://github.com/immich-app/immich"
-BASE_IMG_REPO_DIR=$SCRIPT_DIR/base-images
-SOURCE_DIR=$SCRIPT_DIR/image-source
-LD_LIBRARY_PATH=/usr/local/lib # :$LD_LIBRARY_PATH
-LD_RUN_PATH=/usr/local/lib # :$LD_RUN_PATH
-
-
-git_clone "$REPO_URL" "$BASE_IMG_REPO_DIR" main
+set_common_variables
+safe_git_checkout "$REPO_URL" "$BASE_IMG_REPO_DIR" main
 install_runtime_component
 install_build_dependency
 install_ffmpeg
