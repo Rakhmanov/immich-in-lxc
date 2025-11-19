@@ -194,6 +194,9 @@ create_folders () {
     mkdir -p $TMP_DIR
 }
 
+git_patch () {
+    (cd $INSTALL_DIR_src && git apply $SCRIPT_DIR/git-patches/*.patch)
+}
 
 # -------------------
 # Install immich-web-server
@@ -497,17 +500,23 @@ create_install_env_file
 load_environment_variables
 set_common_variables
 review_install_information
+
 install_node
 set +x
 review_dependency
 clean_previous_build
 create_folders
 safe_git_checkout "$REPO_URL" "$INSTALL_DIR_src" "$REPO_TAG"
+git_patch
 install_immich_web_server_pnpm
-# generate_build_lock <- I dont know if we stil need it I havent had immich complaining
+# # generate_build_lock <- I dont know if we stil need it I havent had immich complaining
 install_immich_machine_learning
 replace_usr_src
 setup_upload_folder
 download_geonames
 create_custom_start_script
 create_runtime_env_file
+
+echo "Installation Completed"
+echo "Restart the service:"
+echo "systemctl restart immich-web immich-ml"

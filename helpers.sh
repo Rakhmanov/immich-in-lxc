@@ -26,8 +26,8 @@ git_checkout_repo() {
         git -C "$target_dir" fetch --tags origin
         git -C "$target_dir" checkout "$ref" || {
             echo "Fetching missing ref '$ref'..."
-            git -C "$target_dir" fetch origin "refs/tags/$ref:refs/tags/$ref" || true
-            git -C "$target_dir" checkout "$ref" || echo "⚠️ Staying on current HEAD"
+            git -C "$target_dir" fetch origin "refs/tags/$ref:refs/tags/$ref"
+            git -C "$target_dir" checkout -f "$ref"
         }
     else
         echo "🧱 Cloning $repo_url → $target_dir (ref: $ref)..."
@@ -61,7 +61,7 @@ safe_git_checkout() {
 
     # Run as the target non-root user
     echo "Switching to $USER_TO_RUN for git operations..."
-    sudo -u "$USER_TO_RUN" bash -c "
+    su "$USER_TO_RUN" bash -c "
         source '$BASH_SOURCE'
         git_checkout_repo '$repo_url' '$target_dir' '$ref'
     "

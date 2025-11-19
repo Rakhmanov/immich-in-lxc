@@ -1,0 +1,13 @@
+diff --git a/machine-learning/pyproject.toml b/machine-learning/pyproject.toml
+index a93ab1c2a..c671812b2 100644
+--- a/machine-learning/pyproject.toml
++++ b/machine-learning/pyproject.toml
+@@ -22,7 +22,7 @@ dependencies = [
+     "rich>=13.4.2",
+     "tokenizers>=0.15.0,<1.0",
+     "uvicorn[standard]>=0.22.0,<1.0",
+-    "rapidocr>=3.1.0",
++    "rapidocr==3.4.1",
+ ]
+ 
+ [dependency-groups]
