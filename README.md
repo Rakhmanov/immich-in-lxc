@@ -1,41 +1,26 @@
 # Immich with CUDA/ROCm Support in LXC (w/o Docker)
 
-A complete guide for installing Immich in LXC, VM, or bare-metal without Docker, but with 
+A complete guide for installing Immich in LXC, VM, or bare-metal without Docker.
 
-- **CUDA/ROCm support for machine-learning** (if one choose so), 
-- **hardware acceleration for transcoding**,
-- **HEIF, RAW, and JXL support**,
-- Experimental Intel iGPU/dGPU/NPU support for machine-learning (if one choose so), 
-- easy and fast upgrade, and
-- accessible proxy settings for PyPi and NPM registry.
+Supports:
+- Upgrades
+- CUDA/ROCm support for machine-learning, 
+- Hardware acceleration for transcoding,
+- HEIF, RAW, and JXL support,
+- Proxy settings for PyPi and NPM registry.
 
-## Introduction
+# Introduction
 
 [Immich](https://github.com/immich-app/immich) is a
 
 > High performance self-hosted photo and video management solution
 
-I really like Immich and its coherent experience across both mobile and web. However, the official Documents only provides Docker installation guide, which is less than ideal for a LXC user. But, in fairness to Immich, not providing a bare-metal installation guide can be justified, as it is more than a simple binary and does require some efforts to set up in current state.
-
-**This guide is heavily inspired by another guide [Immich Native](https://github.com/arter97/immich-native), and the install script & service files are modified from the ones in that repo. KUDO to its author, arter97!** 
-
+This fork of a https://github.com/loeeeee/immich-in-lxc which itself was heavily inspired by another project [Immich Native](https://github.com/arter97/immich-native), and the install script & service files are modified from the ones in that repo. KUDO to its author, arter97! 
 Compared to Immich Native, this repo additionally offers the support for CUDA-accelerated machine learning and (out-of-box) support for processing HEIF, i.e. common smart phone image format, and RAW, i.e. common fancy big camera image format, images.
-
-### Why hardware acceleration?
-
-> I paid for the whole Speedometer, I'm gonna use the whole Speedometer.
->
-> -- Abraham Lincoln
-
-Jokes aside, hardware acceleration really helps during importing library containing many videos, or live photos (essentially a photo and video bundle), or when one would like to switch to or test out a bigger and better machine learning model to improve smart search or face search functionality, which requires a redo of the entire indexing process. However, during current stage and foreseeable future, the heavy work of generating thumbnails will remain on using SIMD commands on CPU, and cannot be accelerated by GPU.
-
-Lastly, by using this repo, one could reliably set up a hardware-accelerated Immich instance without much hassle. So why not.
-
-## Immich Components
 
 
 <details>
-<summary>Not so important</summary>
+<summary>Immich Components</summary>
 
 - Immich
     - Web Server
@@ -55,35 +40,15 @@ Lastly, by using this repo, one could reliably set up a hardware-accelerated Imm
     - CuDNN (Version 9)
 - (Optional) AMD
     - ROCm driver (6.4.1)
-
-As one could tell, it is a lot of works, and a lot of things to get right. However, Immich is quite resilience and will fall-back to a baseline default when hardware acceleration does not work.
-
-For the simplicity of the guide, all the components are installed in a single LXC container. However, it is always possible to run different components in different LXC containers. As it is always a design choice.
-
-<br>
 </details>
 
-## Host setup
+# Installation
+## 1. Prepare the OS
 
-<details>
-<summary>Not so important</summary>
+Create a non privileged LXC/VM normally.
 
-I am using `Proxmox VE 8` as the LXC host, which is based on `Debian 12`, and I have a NVIDIA GPU, with a proprietary driver (550) installed. Some others are using a N100 mini PC box with Intel Quick Sync. And all of these do not matter.
 
-However, if possible, use an LXC or VM with `Ubuntu 24.04 LTS` as it offers an easier set-up.
-
-<br>
-</details>
-
-## Prepare the LXC container, or whatever
-
-First, create a LXC/VM normally. Make sure there is reasonable amount CPU and memory, because we are going to install and compile a lot of things, and it would not hurt to give it a bit more. For a CPU-only Immich server, there should be at least 8 GiB of storage, and one with nVidia GPU, at least 16 GiB storage needs to be available. However, once one starts using Immich, it will create a lot of cache (for thumbnails and low-res transcoded videos), so don't forget to resize the LXC volumes accordingly. 
-
-Also, there is no need for a privileged container (which is not recommended in almost all scenarios), if one does not plan to mount a file system, e.g., NFS, SMB, etc., directly inside the LXC container.
-
-This tutorial is tested on `Ubuntu 24.04 LTS` and `Debian 12` LXCs. Things will differ slightly in different distributions, though. Additionally, if one wants to have HW-accelerated ML, it is not recommend to use older release of `Ubuntu`, as it has older version of dependency in its repository, introducing additional complexity, like package pinning.
-
-## Hardware-accelerated machine learning
+#### Configure Hardware-accelerated machine learning
 
 <details>
 <summary>Nvidia</summary>
@@ -144,8 +109,6 @@ apt install -y cuda-toolkit
 <br>
 </details>
 
-Zu easy, innit?
-
 <br>
 </details>
 
@@ -197,7 +160,7 @@ Good luck and have fun!
 </details>
 
 
-## Immich Installation
+## 2. Immich Installation
 
 ### User creation
 
@@ -208,43 +171,29 @@ adduser --shell /bin/bash --disabled-password immich --comment "Immich Mich"
 # --shell changes the default shell the immich user is using. In this case it will use /bin/bash, instead of the default /bin/sh, which lacks many eye-candy
 # --disabled-password skips creating password, and (sort of) only allows using su to access the user. If you need to change the password of the user, use the command: passwd immich
 # --comment adds user contact info, not super useful but mandatory, probably thanks to Unix legacy.
-apt install -y git
 usermod -aG video,render immich
+apt install -y git
 ```
 
-### Clone the repo
+### 3. Clone the repo
 
 I have make some helper script in this repo, so all one needs to do is clone the repo. We change to the user immich so that the files we cloned will have proper permission. And, just in case one does not know, the commands are as follow.
 
 ```bash
 su immich
 cd ~
-git clone https://github.com/loeeeee/immich-in-lxc.git
-```
-
-Additionally, it is recommend to have our working directory set to the repo's directory.
-
-```bash
+git clone https://github.com/Rakhmanov/immich-in-lxc.git
 cd immich-in-lxc
 ```
 
-### Install custom photo-processing library
-
-Likely because of license issue, many libraries included by distribution package managers do not support all the image format we want, e.g., HEIF, RAW, etc. Thus, we need compile these libraries from source. It can be painful to figure out how to do this, but luckily, I have already sorted out for you.
-
-#### Install compile tools and compile 始める
-
-
-Now `exit` the immich user, as the upcoming commands should be run as `root` user.
+### 4. Install dependencies
+Now `exit` the immich user, as the upcoming commands must be run as `root` user.
 
 ```bash
 ./pre-install.sh
 ```
 
-It is just so satisfying to see the compiling log rolling down the terminal, ain't it? Look carefully at the log, though. There should not be any error. However, some warning about relink will pop up, which is normal.
-
-### Config PostgreSQL like a champ
-
+### 5. Configure PostgreSQL
 
 The following steps apply to both `Debian 12` and `Ubuntu 24.04` instances.
 
@@ -267,10 +216,12 @@ ALTER USER immich WITH SUPERUSER;
 ```
 
 Note: change password, seriously.
-
 Note: To change back to the pre-su user, `exit` should do the trick.
 
-#### Database Migration for Existing Users (v1.133.0+)
+
+
+<details>
+<summary>Database Migration for Existing Users (v1.133.0+)</summary>
 
 **Note:** Starting with Immich v1.133.0, the project has migrated from pgvecto.rs to [VectorChord](https://github.com/tensorchord/VectorChord) for better performance and stability.
 
@@ -283,26 +234,26 @@ If you're upgrading from a version prior to v1.133.0 and have an existing Immich
 
 For more details on the VectorChord migration, see the [official Immich v1.133.0 release notes](https://github.com/immich-app/immich/releases/tag/v1.133.0).
 
-### Install Immich Server
+</details>
 
-The star of the show is the install script, i.e. `install.sh` in this repo. It installs or updates the current Immich instance. The Immich instance itself is stateless, thanks to its design. Thus, it is safe to delete the `app` folder that will resides inside `INSTALL_DIR` folder that we are about to config. 
+### 6. Install Immich Server
+
+The install.sh installs or updates the current Immich instance. The Immich instance itself is stateless, thanks to its design.
+Thus, it is safe to delete the `app` folder that will resides inside `INSTALL_DIR` folder that we are about to config. 
 
 Note: **DO NOT DELETE UPLOAD FOLDER SPECIFIED BY `INSTALL_DIR` IN `.env`**. It stores all the user-uploaded content. 
 
 Also note: One should always do a snapshot of the media folder during the updating or installation process, just in case something goes horribly wrong.
 
-#### The environment variables
+#### Configuring the installation
 
-An example .env file that will be generated when no `.env` file is found inside current working directory when executing the script.
-
-Let us go ahead and execute the script as `immich` user (or the user that will be running immich). No worry, when `.env` file is not found, the script will gracefully exit and will not change to the file system.
+The example configuration lives in install.env, create a copy and modify parameters.
+Execute the script as `immich` user. 
 
 ```bash
-su immich # Or the user who is going to run immich. It should be the same user as the one used for installing Node.js.
-./install.sh
+su immich
+cp install.env .env
 ```
-
-Then, we should have a `.env` file in current directory. 
 
 - `REPO_TAG` is the version of the Immich that we are going to install,
 - `INSTALL_DIR` is where the `app` and `source` folders will resides in (e.g., it can be a `mnt` point),
@@ -324,21 +275,20 @@ After the `.env` is properly configured, we are now ready to do the actual insta
 ```bash
 ./install.sh
 ```
-
 Note, `install.sh` should be executed as user `immich`, or the user who is going to run immich.
 
-It should go without errors, just like ever dev says.
-
-After several minutes, ideally, it would say,
 
 ```bash
 Done. Please install the systemd services to start using Immich.
 ```
 
-Lastly, we need to review and modify the `runtime.env` that is inside your specified `INSTALL_DIR` (not the runtime.env inside this repo). The default values could also work, unless you changed the `DB_PASSWORD` when installing Postgres. 
+#### Update the password in /home/immich/runtime.env
 
-**Note:** If your `DB_PASSWORD` contains special characters (such as `$`, `!`, etc.), you must wrap the value in single quotes, e.g., `DB_PASSWORD='your$pec!alP@ss'`. This prevents shell expansion issues when the environment file is sourced. (See [issue #95](https://github.com/loeeeee/immich-in-lxc/issues/95) for details.)
+Lastly, we need to review and modify the `runtime.env` that is inside your specified `INSTALL_DIR` (not the runtime.env inside this repo). 
+The default values could also work, unless you changed the `DB_PASSWORD` when installing Postgres. 
 
+**Note:** If your `DB_PASSWORD` contains special characters (such as `$`, `!`, etc.), you must wrap the value in single quotes, e.g., `DB_PASSWORD='your$pec!alP@ss'`. 
+This prevents shell expansion issues when the environment file is sourced. (See [issue #95](https://github.com/loeeeee/immich-in-lxc/issues/95) for details.)
 For Timezones `TZ`, you can consult them in the [TZ Database Wiki](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones#List).
 
 #### Post install script
@@ -381,9 +331,10 @@ Because we are install Immich instance in a none docker environment, some DNS lo
 
 Additionally, for LXC with CUDA or other GPU Transcoding support enabled, one needs to go to `Administration > Settings > Video Transcoding Settings > Hardware Acceleration > Acceleration API` and select your GPU Transcoding (e.g., `NVENC` - for CUDA) to explicitly use the GPU to do the transcoding.
 
-## Update the Immich instance
+# Update procedure
 
-The Immich server instance is designed to be stateless, meaning that deleting the instance, i.e. the `INSTALL_DIR/app` folder, (NOT DATABASE OR OTHER STATEFUL THINGS) will not break anything. Thus, to upgrade the current Immich instance, all one needs to do is essentially install the latest Immich.
+The Immich server instance is designed to be stateless, meaning that deleting the instance, i.e. the `INSTALL_DIR/app` folder, (NOT DATABASE OR OTHER STATEFUL THINGS) will not break anything. 
+Thus, to upgrade the current Immich instance, all one needs to do is essentially install the latest Immich.
 
 - **v1.133.0+ Breaking Changes:** If upgrading to v1.133.0 or later, ensure you're upgrading from at least v1.107.2 or later. If you're on an older version, upgrade to v1.107.2 first and ensure Immich starts successfully before continuing.
 
