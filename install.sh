@@ -6,6 +6,38 @@
 # -------------------
 source "./helpers.sh"
 
+
+# -------------------
+# Check services are off
+# -------------------
+
+check_services_off() {
+    local services=(
+        "immich-web.service"
+        "immich-ml.service"
+    )
+
+    for svc in "${services[@]}"; do
+        # Does the unit exist?
+        if systemctl list-unit-files --type=service | grep -q "^${svc}"; then
+            # Unit exists — check if running
+            if systemctl is-active --quiet "$svc"; then
+                echo "Service $svc is RUNNING — expected OFF."
+                echo "To stop services (as root):"
+                echo "systemctl stop $svc"
+                return 1
+            else
+                echo "Service $svc exists and is OFF."
+            fi
+        else
+            # Unit not found — treat as safely off
+            echo "Service $svc does not exist yet — treating as OFF."
+        fi
+    done
+
+    return 0
+}
+
 # -------------------
 # Check current user
 # -------------------
@@ -26,16 +58,10 @@ SCRIPT_DIR=$PWD
 create_install_env_file () {
     # Check if env file exists
     if [ ! -f $SCRIPT_DIR/.env ]; then
-        # If not, create a new one based on the template
-        if [ -f $SCRIPT_DIR/install.env ]; then
-            cp install.env .env
-            echo "New .env file created from the template, exiting"
-            echo "Please review the .env before rerunning the script"
-            exit 0
-        else
-            echo ".env.template not found, please clone the entire repo, exiting"
-            exit 1
-        fi
+        echo "Error: .env file not found"
+        echo "Create one by modifying an example file install.env"
+        echo "cp install.env .env"
+        exit 1
     fi
 }
 
@@ -195,7 +221,12 @@ create_folders () {
 }
 
 git_patch () {
-    (cd $INSTALL_DIR_src && git apply $SCRIPT_DIR/git-patches/$REPO_TAG/*.patch || true)
+    if [ -d "$SCRIPT_DIR/git-patches/$REPO_TAG" ]; then
+        (
+            cd $INSTALL_DIR_src
+            git apply $SCRIPT_DIR/git-patches/$REPO_TAG/*.patch
+        )
+    fi
 }
 
 # -------------------
@@ -238,6 +269,26 @@ install_immich_web_server_pnpm () {
     cp -a i18n $INSTALL_DIR/
     cp -a server/bin/get-cpus.sh server/bin/start.sh $INSTALL_DIR_app/
 
+    # Build plugins v2.3.0 +
+    npm install -g @jdxcode/mise
+
+    if [ -d "plugins" ]; then
+        (
+            cd plugins
+            pnpm install
+            mise trust --all --yes
+            mise build --yes
+        )
+
+        # Trust
+        # Copy results to app folder.
+        mkdir -p ./app/corePlugin
+        cp -a ./plugins/dist "$INSTALL_DIR_app/corePlugin"
+        cp -a ./plugins/manifest.json "$INSTALL_DIR_app/corePlugin/manifest.json"
+    else
+        echo "plugins directory not found — skipping plugin build."
+    fi
+
     # Unset mirror for pnpm (if it was set)
     if [ ! -z "${PROXY_NPM}" ]; then
         pnpm config delete registry
@@ -250,7 +301,7 @@ install_immich_web_server_pnpm () {
 # -------------------
 
 generate_build_lock () {
-    # So that immich would not complain
+    # Resolve Nest's Warning "Failed to read /home/immich/app/build-lock.json"
     cd $SCRIPT_DIR
 
     REPO_URL_BASE_IMG="https://github.com/immich-app/base-images"
@@ -464,11 +515,6 @@ create_runtime_env_file () {
 }
 
 
-echo "----------------------------------------------------------------"
-echo "Done. Please install the systemd services to start using Immich."
-echo "----------------------------------------------------------------"
-
-
 # -------------------
 # Helper function that checks user consent
 # -------------------
@@ -493,23 +539,24 @@ confirm_destruction() {
     return 0
 }
 
-set -xeuo pipefail # Make people's life easier
+set -euo pipefail
+# set -x # Print each command (Debugging)
 
 check_user_id
+check_services_off
 create_install_env_file
 load_environment_variables
 set_common_variables
 review_install_information
 
 install_node
-set +x
 review_dependency
 clean_previous_build
 create_folders
 safe_git_checkout "$REPO_URL" "$INSTALL_DIR_src" "$REPO_TAG"
 git_patch
 install_immich_web_server_pnpm
-# # generate_build_lock <- I dont know if we stil need it I havent had immich complaining
+generate_build_lock
 install_immich_machine_learning
 replace_usr_src
 setup_upload_folder
@@ -517,6 +564,11 @@ download_geonames
 create_custom_start_script
 create_runtime_env_file
 
-echo "Installation Completed"
-echo "Restart the service:"
+echo "----------------------------------------------------------------"
+echo "Installation/Upgrade Completed"
+echo "----------------------------------------------------------------"
+echo "If this was intallation then please continue with post-install.sh."
+echo "./post-install.sh"
+echo "----------------------------------------------------------------"
+echo "If this was an update, restart the services (as root):"
 echo "systemctl restart immich-web immich-ml"
