@@ -195,7 +195,7 @@ create_folders () {
 }
 
 git_patch () {
-    (cd $INSTALL_DIR_src && git apply $SCRIPT_DIR/git-patches/*.patch)
+    (cd $INSTALL_DIR_src && git apply $SCRIPT_DIR/git-patches/$REPO_TAG/*.patch)
 }
 
 # -------------------
