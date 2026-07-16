@@ -7,5 +7,6 @@ docker-compose.yml
 .intel-things-success-0
 node_modules/
 *.env
+!example.env
 runtime.env
 ltmain.sh

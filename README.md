@@ -1,356 +1,202 @@
-# Immich with CUDA/ROCm Support in LXC (w/o Docker)
+# Immich in LXC without Docker
 
-A complete guide for installing Immich in LXC, VM, or bare-metal without Docker.
+Install and update [Immich](https://github.com/immich-app/immich) directly in an LXC container, VM, or bare-metal host. The installer provides PostgreSQL, Redis, native media libraries, the Immich web server, machine learning, and systemd services without using Docker for the deployed instance.
 
-Supports:
-- Upgrades
-- CUDA/ROCm support for machine-learning, 
-- Hardware acceleration for transcoding,
-- HEIF, RAW, and JXL support,
-- Proxy settings for PyPi and NPM registry.
+This project is a fork of [loeeeee/immich-in-lxc](https://github.com/loeeeee/immich-in-lxc), inspired by [Immich Native](https://github.com/arter97/immich-native).
 
-# Introduction
+## Supported systems
 
-[Immich](https://github.com/immich-app/immich) is a
+- Ubuntu 24.04
+- Debian 13
+- systemd
+- CPU machine learning by default
+- Optional NVIDIA CUDA, AMD ROCm, and Intel OpenVINO machine learning
 
-> High performance self-hosted photo and video management solution
+Debian 12 is not supported. Older releases of this installer could accidentally mix Debian releases; read [Debian recovery](docs/troubleshooting-and-recovery.md#debian-testing-repository-recovery) before changing an existing Debian 12 installation.
 
-This is a fork of a https://github.com/loeeeee/immich-in-lxc which itself was inspired by [Immich Native](https://github.com/arter97/immich-native). A lot of work originated from that repo. 
-Huge kudos to the authors loeeeee and arter97! 
+## Before you begin
 
-Compared to Immich Native, this repo additionally offers the support for CUDA-accelerated machine learning and (out-of-box) support for processing HEIF, i.e. common smart phone image format, and RAW, i.e. common fancy big camera image format, images.
+Use a fresh container or VM and take a snapshot before installing. The commands below assume:
 
+| Purpose | Path |
+| --- | --- |
+| Installer checkout | `/home/immich/immich-in-lxc` |
+| Installed application | `/home/immich/app` |
+| Immich source used for builds | `/home/immich/source` |
+| Photos and Immich-generated media | `/mnt/photos` |
+| Web interface | `http://<container-ip>:2283` |
 
-<details>
-<summary>Immich Components</summary>
+Mount the media disk at `/mnt/photos` before installing. If you deliberately want everything on the container disk, use `/home/immich/upload` as `UPLOAD_DIR` instead.
 
-- Immich
-    - Web Server
-    - Machine Learning Server
-- Database
-    - Redis
-    - Postgresql
-        - VectorChord
-- System
-    - Jellyfin-ffmpeg
-    - Node.js
-    - git
-- (Optional) Reverse Proxy
-    - Nginx
-- (Optional) NVIDIA
-    - Driver (i.e. CUDA Runtime)
-    - CuDNN (Version 9)
-- (Optional) AMD
-    - ROCm driver (6.4.1)
-</details>
+The installation downloads and compiles large dependencies. Allow plenty of disk space and time.
 
-# Installation
-## 1. Prepare the OS
+## Install
 
-Create a non privileged LXC/VM normally.
+Follow this recipe in order. Commands marked **root** must run from a root shell; do not add `sudo` unless your guest is already configured for it.
 
-
-#### Configure Hardware-accelerated machine learning
-
-<details>
-<summary>Nvidia</summary>
-
-Firstly, prepare a LXC with GPU available by following the guide at [another repository](https://github.com/loeeeee/loe-handbook-of-gpu-in-lxc/blob/main/src/gpu-passthrough.md) of mine. This process is referred to as NVIDIA GPU pass-through in LXC.
-
-After finishing all of the steps in that guide, the guest OS should execute command `nvidia-smi` without any error.
-
-The major component that Immch requires is [ONNX runtime](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html#requirementsto), and here we are installing its dependency.
-
-<details>
-<summary>Ubuntu 24.04</summary>
-
-For Immich machine learning support in `Ubuntu`, we need to install CuDNN and CUDA Toolkit. The default cuDNN version in apt is version 8, which is no longer supported by ONNX Runtime. Thus, we need to install the latest version 9.
-
-The CuDNN install commands are from [official website of NVIDIA](https://developer.nvidia.com/cudnn-downloads), and should all be run as root. Also, one should check the NVIDIA website for updates.
+### 1. Bootstrap the host as root
 
 ```bash
-wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
-dpkg -i cuda-keyring_1.1-1_all.deb
 apt-get update
-
-apt-get -y install cudnn-cuda-12
-```
-
-In addition to the cuDNN, we also need libcublas12 things.
-
-```bash
-apt install -y libcublaslt12 libcublas12 libcurand10
-```
-
-<br>
-</details>
-
-<details>
-<summary>Debian 12</summary>
-
-For Immich machine learning support in `Debian`, we need to install CuDNN and CUDA Toolkit.
-
-We install the entire CUDA Toolkit because install `libcublas` depends on CUDA Toolkit, and when install the toolkit, this right version of this component will be included.
-
-The CuDNN install commands are from [official website of NVIDIA](https://developer.nvidia.com/cudnn-downloads), and should all be run as root. Also, one should check the NVIDIA website for updates.
-
-```bash
-# CuDNN part
-wget https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb
-dpkg -i cuda-keyring_1.1-1_all.deb
-add-apt-repository contrib
-apt-get update
-apt-get -y install cudnn
-## Specified by NVIDIA, but does not seem to install anything
-apt-get -y install cudnn-cuda-12
-
-# CUDA Toolkit part
-apt install -y cuda-toolkit
-```
-
-<br>
-</details>
-
-<br>
-</details>
-
-
-<details>
-<summary>Intel/OpenVINO</summary>
-
-This part is intended for users who would like to utilize Intel's OpenVINO execution provider. ([System requirement](https://docs.openvino.ai/2024/about-openvino/release-notes-openvino/system-requirements.html), [List of supported devices](https://docs.openvino.ai/2024/about-openvino/compatibility-and-support/supported-devices.html)) The document listed the support for not only Intel iGPU and dGPU, but also its NPU, which seems very cool.
-
-Disclaimer: This part is not yet tested by the repo owner, and it is composed based on documentation. However, success have been reported ([Issue #58](https://github.com/loeeeee/immich-in-lxc/issues/58)), even though one could not see the background tasks ([Issue #62](https://github.com/loeeeee/immich-in-lxc/issues/62)). 
-
-<details>
-<summary>Moe</summary>
-Firstly, prepare a LXC with proper hardware available. For iGPU user, one could use `intel_gpu_top` to see its availability.
-
-Then, install the dependency specified by Immich for Intel.
-
-```bash
-./dep-intel.sh
-```
-
-Finally, after first-time execution of the `install.sh`, which happens at later part of the guide (so safe to skip for now), modify the generated `.env` file.
-
-```env
-isCUDA=openvino
-```
-
-I know, this is ugly as hell, but whatever, it works.
-
-Now, when installing Immich, it will be using OpenVINO as its ML backend.
-
-<br>
-</details>
-
-<br>
-</details>
-
-
-<details>
-<summary>Others</summary>
-
-Since Immich depends on ONNX runtime, it is **possible** that other hardware that is not officially supported by Immich can be used to do machine learning tasks. The idea here is that installing the dependency for the hardware following [ONNX's instruction](https://onnxruntime.ai/docs/execution-providers/#summary-of-supported-execution-providers). 
-
-Some users have also reported successful results using GPU Transcoding in Immich by following the Proxmox configurations from this video: [iGPU Transcoding In Proxmox with Jellyfin Media Center](https://www.youtube.com/watch?v=XAa_qpNmzZs) - Just avoid all the Jellyfin stuff and do the configurations on the Immich container instead. At the end, you should be able to use your iGPU Transcoding in Immich by going to needs to go to `Administration > Settings > Video Transcoding Settings > Hardware Acceleration > Acceleration API` and select `Quick Sync` to explicitly use the GPU to do the transcoding.
-
-Good luck and have fun!
-
-<br>
-</details>
-
-
-## 2. Immich Installation
-
-### User creation
-
-First of all, create a Immich user, if you already done so in the above optional section, you may safely skip the following code block. The user created here will run Immich server.
-
-```bash
-adduser --shell /bin/bash --disabled-password immich --comment "Immich Mich"
-# --shell changes the default shell the immich user is using. In this case it will use /bin/bash, instead of the default /bin/sh, which lacks many eye-candy
-# --disabled-password skips creating password, and (sort of) only allows using su to access the user. If you need to change the password of the user, use the command: passwd immich
-# --comment adds user contact info, not super useful but mandatory, probably thanks to Unix legacy.
-usermod -aG video,render immich
-apt install -y git
-```
-
-### 3. Clone the repo
-
-I have make some helper script in this repo, so all one needs to do is clone the repo. We change to the user immich so that the files we cloned will have proper permission. And, just in case one does not know, the commands are as follow.
-
-```bash
-su immich
-cd ~
-git clone https://github.com/Rakhmanov/immich-in-lxc.git
-cd immich-in-lxc
-```
-
-### 4. Install dependencies
-Now `exit` the immich user, as the upcoming commands must be run as `root` user.
-
-```bash
+apt-get install -y git
+git clone https://github.com/Rakhmanov/immich-in-lxc.git /opt/immich-in-lxc-bootstrap
+cd /opt/immich-in-lxc-bootstrap
 ./pre-install.sh
 ```
 
-### 5. Configure PostgreSQL
+`pre-install.sh` asks for a password for the new `immich` Linux user and a password for the Immich PostgreSQL role. It then:
 
-The following steps apply to both `Debian 12` and `Ubuntu 24.04` instances.
+- creates the `immich` service account;
+- installs and builds the system dependencies;
+- configures PostgreSQL 17, VectorChord, and Redis;
+- installs the systemd units and stable service launcher; and
+- creates the working checkout at `/home/immich/immich-in-lxc`.
 
-Enter PostgreSQL control interface
+For unattended setup, provide `USER_PASSWORD` and `DB_PASSWORD` to `pre-install.sh`. Use `RUN_USER=name` only if you intentionally want a service user other than `immich`.
 
-```bash
-# As root
-su postgres
-# Now you are user:postgres
-psql
-```
+### 2. Verify the media mount as root
 
-In the psql interface, run:
-```SQL
-CREATE DATABASE immich;
-CREATE USER immich WITH ENCRYPTED PASSWORD 'A_SEHR_SAFE_PASSWORD';
-GRANT ALL PRIVILEGES ON DATABASE immich to immich;
-ALTER USER immich WITH SUPERUSER;
-\q
-```
-
-Note: change password, seriously.
-Note: To change back to the pre-su user, `exit` should do the trick.
-
-
-
-<details>
-<summary>Database Migration for Existing Users (v1.133.0+)</summary>
-
-**Note:** Starting with Immich v1.133.0, the project has migrated from pgvecto.rs to [VectorChord](https://github.com/tensorchord/VectorChord) for better performance and stability.
-
-If you're upgrading from a version prior to v1.133.0 and have an existing Immich installation, you may need to perform a database migration. The migration from pgvecto.rs to VectorChord is automatic, but you should:
-
-1. **Backup your database** before upgrading
-2. Ensure you're upgrading from at least v1.107.2 or later
-
-**Note:** If you have an existing `$INSTALL_DIR/runtime.env` (e.g. /home/immich/runtime.env) file with `DB_VECTOR_EXTENSION=pgvector`, you should update it to `DB_VECTOR_EXTENSION=vectorchord` for the new VectorChord extension.
-
-For more details on the VectorChord migration, see the [official Immich v1.133.0 release notes](https://github.com/immich-app/immich/releases/tag/v1.133.0).
-
-</details>
-
-### 6. Install Immich Server
-
-The install.sh installs or updates the current Immich instance. The Immich instance itself is stateless, thanks to its design.
-Thus, it is safe to delete the `app` folder that will resides inside `INSTALL_DIR` folder that we are about to config. 
-
-Note: **DO NOT DELETE UPLOAD FOLDER SPECIFIED BY `INSTALL_DIR` IN `.env`**. It stores all the user-uploaded content. 
-
-Also note: One should always do a snapshot of the media folder during the updating or installation process, just in case something goes horribly wrong.
-
-#### Configuring the installation
-
-The example configuration lives in example.env, create a copy and modify parameters.
-Execute the script as `immich` user. 
+The `immich` user must be able to create files in the media directory:
 
 ```bash
-su immich
-cp example.env .env
+test -d /mnt/photos
+runuser -u immich -- test -w /mnt/photos
 ```
 
-- `REPO_TAG` is the version of the Immich that we are going to install,
-- `INSTALL_DIR` is where the `app` and `source` folders will resides in (e.g., it can be a `mnt` point),
-- `UPLOAD_DIR` is where the user uploads goes to  (it can be a `mnt` point), 
-- `isCUDA` when set to true, will install Immich with CUDA supprt. For other GPU Transcodings, this is likely to remain false. (available flag: true, false, openvino, rocm)
-- For user with compromised network accessibility:
-    - `PROXY_NPM` sets the mirror URL that npm will use, if empty, it will use the official one,
-    - :new:`PROXY_NPM_DIST` sets the dist URL that node-gyp will use, if empty, it will use the official one, and
-    - `PROXY_POETRY` sets the mirror URL that poetry will use, if empty, it will use the official one.
+If either command fails, stop and fix the mount or LXC UID/GID mapping. Do not work around it by running `install.sh` as root. See [Storage and filesystem layout](docs/storage-and-layout.md).
 
-Note: The `immich` user should have read and write access to both `INSTALL_DIR` and `UPLOAD_DIR`.
+### 3. Configure Immich as the service user
 
-Note: :new: means user might need to create the empty entry to make script run.
+```bash
+su - immich
+cd ~/immich-in-lxc
+test -f .env || cp example.env .env
+nano .env
+```
 
-#### Run the script
+Use this configuration for the layout above:
 
-After the `.env` is properly configured, we are now ready to do the actual installation.
+```dotenv
+REPO_TAG=v3.0.2
+INSTALL_DIR=/home/immich
+UPLOAD_DIR=/mnt/photos
+isCUDA=false
+
+PROXY_NPM=
+PROXY_NPM_DIST=
+PROXY_POETRY=
+```
+
+`INSTALL_DIR` is the deployment root, not the installer checkout. The installer creates `/home/immich/app/upload` as a symlink to `/mnt/photos`; do not create or replace that application symlink manually.
+
+### 4. Build and deploy as the service user
 
 ```bash
 ./install.sh
 ```
-Note, `install.sh` should be executed as user `immich`, or the user who is going to run immich.
 
+Review `/home/immich/runtime.env` after installation, especially `TZ`. It contains the runtime database settings and is mode `0600`. Its stable systemd link is `/home/immich/.config/immich-in-lxc/runtime.env`.
 
-```bash
-Done. Please install the systemd services to start using Immich.
-```
-
-#### Update the password in /home/immich/runtime.env
-
-Lastly, we need to review and modify the `runtime.env` that is inside your specified `INSTALL_DIR` (not the runtime.env inside this repo). 
-The default values could also work, unless you changed the `DB_PASSWORD` when installing Postgres. 
-
-**Note:** If your `DB_PASSWORD` contains special characters (such as `$`, `!`, etc.), you must wrap the value in single quotes, e.g., `DB_PASSWORD='your$pec!alP@ss'`. 
-This prevents shell expansion issues when the environment file is sourced. (See [issue #95](https://github.com/loeeeee/immich-in-lxc/issues/95) for details.)
-For Timezones `TZ`, you can consult them in the [TZ Database Wiki](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones#List).
-
-#### Post install script
-
-The post install script will copy the systemd service files to proper location (and overwrite the original ones), assuming one is using Ubuntu, or something similar. Additionally, it creates a folder for log at `/var/log/`. Both operation requires `sudo/root` privilege, so make sure to review the script before proceeding.
+Return to the root shell when the installer finishes:
 
 ```bash
-./post-install.sh
+exit
 ```
 
-Then, modify the `service` files to make sure every path name is spelled correctly. You might need to modify the variables `WorkingDirectory`, `EnvironmentFile`, `ExecStart` with the `INSTALL_DIR` specified in the `.env` file (in case you didn't leave the default INSTALL_DIR).
+### 5. Start and verify as root
 
 ```bash
-nano /etc/systemd/system/immich-ml.service # Modify WorkingDirectory, EnvironmentFile, and ExecStart with your INSTALL_DIR, in case you changed it.
-```
-```bash
-nano /etc/systemd/system/immich-web.service # Modify ExecStart with your INSTALL_DIR, in case you changed it.
-```
-
-After that, we are ready to start our Immich instance!
-
-```bash
-systemctl daemon-reload && \
-systemctl start immich-ml && \
-systemctl start immich-web
+systemctl daemon-reload
+systemctl enable --now immich-ml immich-web
+systemctl --no-pager --full status immich-ml immich-web
+curl --fail http://127.0.0.1:2283/api/server/ping
 ```
 
-The default setting exposes the Immich web server on port `2283` on all available address. For security reason, one should put a reverse proxy, e.g. Nginx, HAProxy, in front of the immich instance and add SSL to it.
+Open `http://<container-ip>:2283`, create the first admin account, then set:
 
-To make the service persistent and start after reboot,
+`Administration > Settings > Machine Learning Settings > URL`
 
-```bash
-systemctl enable immich-ml && \
-systemctl enable immich-web
+to:
+
+```text
+http://localhost:3003
 ```
 
-#### Immich config
+Immich is now installed. Put a TLS reverse proxy in front of port `2283` before exposing it outside a trusted network.
 
-Because we are install Immich instance in a none docker environment, some DNS lookup will not work. For instance, we need to change the URL inside `Administration > Settings > Machine Learning Settings > URL` to `http://localhost:3003`, otherwise the web server cannot communicate with the ML backend.
+## Update
 
-Additionally, for LXC with CUDA or other GPU Transcoding support enabled, one needs to go to `Administration > Settings > Video Transcoding Settings > Hardware Acceleration > Acceleration API` and select your GPU Transcoding (e.g., `NVENC` - for CUDA) to explicitly use the GPU to do the transcoding.
+This procedure refreshes both host dependencies and the deployed Immich application.
 
-# Update procedure
-
-The Immich server instance is designed to be stateless, meaning that deleting the instance, i.e. the `INSTALL_DIR/app` folder, (NOT DATABASE OR OTHER STATEFUL THINGS) will not break anything. 
-Thus, to upgrade the current Immich instance, all one needs to do is essentially install the latest Immich.
-
-- **v1.133.0+ Breaking Changes:** If upgrading to v1.133.0 or later, ensure you're upgrading from at least v1.107.2 or later. If you're on an older version, upgrade to v1.107.2 first and ensure Immich starts successfully before continuing.
-
-First thing to do is to stop the old instance.
+### 1. Back up and stop Immich as root
 
 ```bash
-systemctl stop immich-ml && \
-systemctl stop immich-web
+install -d -o postgres -g postgres -m 0700 /var/backups/immich
+backup="/var/backups/immich/immich-$(date +%Y%m%d-%H%M%S).dump"
+runuser -u postgres -- pg_dump --format=custom --file="$backup" immich
+test -s "$backup"
+echo "Database backup: $backup"
+systemctl stop immich-web immich-ml
 ```
 
-After stopping the old instance, update this repo by doing a `git pull` in the folder `immich-in-lxc` (using the `immich` user). 
+Copy the database dump off the guest and take a container/VM snapshot. If `/mnt/photos` is a separate mount, confirm that it has its own backup; a guest snapshot may not include it.
 
-Then, the modify `REPO_TAG` value in `.env` file based on the one in `example.env`. 
+### 2. Update the installer checkout
 
-Finally, run the `install.sh` and it will update Immich, hopefully without problems.
+```bash
+su - immich
+cd ~/immich-in-lxc
+git pull --ff-only
+nano .env
+exit
+```
 
-Also, don't forget to start the service again, to load the latest Immich instance.
+Set `REPO_TAG` in `.env` to the version you intend to install. Compare it with `example.env` after pulling, but do not overwrite your `INSTALL_DIR`, `UPLOAD_DIR`, accelerator, or proxy settings.
+
+### 3. Refresh host dependencies as root
+
+```bash
+cd /home/immich/immich-in-lxc
+./pre-install.sh
+```
+
+The pre-install stage is safe to rerun. It preserves existing passwords unless password override variables are explicitly supplied.
+
+### 4. Redeploy as the service user
+
+```bash
+su - immich
+cd ~/immich-in-lxc
+./install.sh
+exit
+```
+
+The installer replaces `/home/immich/app`. It does not delete `UPLOAD_DIR`, but a backup and snapshot are still required safeguards.
+
+### 5. Restart and verify as root
+
+```bash
+systemctl daemon-reload
+systemctl restart immich-ml immich-web
+systemctl --no-pager --full status immich-ml immich-web
+curl --fail http://127.0.0.1:2283/api/server/ping
+```
+
+If either service fails, do not repeatedly rerun the installer. Capture the logs and follow [Troubleshooting and recovery](docs/troubleshooting-and-recovery.md).
+
+## Optional configurations
+
+- [Storage and filesystem layout](docs/storage-and-layout.md) — mounted disks, local SSD thumbnails, permissions, and what must be backed up
+- [Hardware acceleration](docs/hardware-acceleration.md) — NVIDIA CUDA, AMD ROCm, Intel OpenVINO, and transcoding
+- [Nginx reverse proxy](docs/nginx-reverse-proxy.md) — HTTPS termination and forwarding to port `2283`
+- [Troubleshooting and recovery](docs/troubleshooting-and-recovery.md) — logs, health checks, Debian repository recovery, and older database migrations
+- [Testing](docs/testing.md) — fast, full, systemd, Debian 13, and real CUDA Docker tests
+
+## Important boundaries
+
+- Run `pre-install.sh` as root.
+- Run `install.sh` as the service user, never as root.
+- The installer checkout can be replaced; the deployed app and media paths are separate.
+- Never delete `UPLOAD_DIR` during an update.
+- Do not expose port `2283` directly to the public internet.
+- This is an unofficial community installer. Review Immich release notes before every version upgrade.

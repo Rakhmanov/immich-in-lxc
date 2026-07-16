@@ -1,0 +1,32 @@
+name: Docker Installer Smoke Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      full_install:
+        description: Build native Immich and require the web ping endpoint
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  docker-smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - base_image: ubuntu:24.04
+            test_os: ubuntu-24.04
+          - base_image: debian:13
+            test_os: debian-13
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run non-systemd and systemd container tests
+        env:
+          BASE_IMAGE: ${{ matrix.base_image }}
+          TEST_OS: ${{ matrix.test_os }}
+          FULL_INSTALL: ${{ inputs.full_install && (matrix.test_os == 'ubuntu-24.04' || matrix.test_os == 'debian-13') && '1' || '0' }}
+        run: ./scripts/test-in-docker.sh

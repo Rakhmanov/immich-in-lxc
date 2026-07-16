@@ -12,7 +12,8 @@ Type=simple
 Restart=on-failure
 UMask=0077
 
-ExecStart=/bin/bash /home/immich/app/start.sh
+EnvironmentFile=/home/immich/.config/immich-in-lxc/runtime.env
+ExecStart=/usr/local/libexec/immich-in-lxc/service-launch.sh web /home/immich/.config/immich-in-lxc/runtime.env
 
 SyslogIdentifier=immich-web
 StandardOutput=append:/var/log/immich/web.log
