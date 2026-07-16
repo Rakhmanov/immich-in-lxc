@@ -59,6 +59,7 @@ if [[ "$PERSISTENT_CACHE" == 1 ]]; then
     cache_prefix="${TEST_CACHE_PREFIX:-immich-in-lxc-test-$cache_scope}"
     container_args+=(
         -e TEST_PERSISTENT_CACHE=1
+        -v "$cache_prefix-apt-archives:/var/cache/apt/archives"
         -v "$cache_prefix-build:/home/immich/build"
         -v "$cache_prefix-user-cache:/home/immich/.cache"
         -v "$cache_prefix-pnpm-store:/home/immich/.local/share/pnpm/store"

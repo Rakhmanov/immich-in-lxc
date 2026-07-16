@@ -4,7 +4,9 @@
 # Include helper functions
 # Such as git git_checkout_repo
 # -------------------
-source "./helpers.sh"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=helpers.sh
+source "$SCRIPT_DIR/helpers.sh"
 
 
 # -------------------
@@ -53,8 +55,6 @@ check_user_id () {
 # -------------------
 # Create env file if it does not exists
 # -------------------
-SCRIPT_DIR=$PWD
-
 create_install_env_file () {
     # Check if env file exists
     if [ ! -f $SCRIPT_DIR/.env ]; then

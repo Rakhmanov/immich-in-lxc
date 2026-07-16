@@ -62,8 +62,8 @@ FULL_INSTALL=1 CUDA_TEST=1 TEST_REPO_TAG=v3.0.3 ./scripts/test-in-docker.sh
 
 ## Reusing download and source caches
 
-Long full-install retries can reuse Docker named volumes for native source
-checkouts plus the NVM, pnpm, and user download caches:
+Long full-install retries can reuse Docker named volumes for apt/CUDA packages,
+native source checkouts, plus the NVM, pnpm, and user download caches:
 
 ```bash
 PERSISTENT_CACHE=1 FULL_INSTALL=1 CUDA_TEST=1 TEST_REPO_TAG=v3.0.3 \
@@ -91,6 +91,9 @@ disposable.
 ## Docker systemd requirements
 
 The systemd test needs privileged mode, the host cgroup namespace, and a writable `/sys/fs/cgroup` mount. The harness configures these automatically. If Docker itself is unavailable, it exits before changing the host.
+
+For the production-oriented form of this same supported-systemd pattern, read
+[Native installer inside a persistent systemd container](native-systemd-container.md).
 
 ## What remains environment-specific
 

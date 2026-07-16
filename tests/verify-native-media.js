@@ -19,8 +19,11 @@ async function encode(format) {
 
 async function main() {
   assert.ok(sharp.versions.vips, 'Sharp did not report a libvips runtime version');
-  assert.equal(sharp.format.avif.output, true, 'Sharp lacks AVIF output support');
-  assert.equal(sharp.format.jxl.output, true, 'Sharp lacks JPEG-XL output support');
+  // Sharp exposes AVIF through libvips' HEIF loader/encoder alias rather than
+  // as a separate `format.avif` entry. Require buffer output because that is
+  // the path exercised by the encodes below.
+  assert.equal(sharp.format.heif?.output?.buffer, true, 'Sharp lacks AVIF output support');
+  assert.equal(sharp.format.jxl?.output?.buffer, true, 'Sharp lacks JPEG-XL output support');
 
   console.log(JSON.stringify({ versions: sharp.versions, simd: sharp.simd() }));
   await Promise.all(['jpeg', 'avif', 'jxl'].map(encode));

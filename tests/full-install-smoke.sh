@@ -21,19 +21,32 @@ fi
 # account early and hand only the cache paths to it; pre-install.sh remains
 # responsible for all normal account configuration and credentials.
 if [[ "${TEST_PERSISTENT_CACHE:-0}" == 1 ]]; then
+    # Ubuntu's container-specific apt hook deletes downloaded debs after every
+    # install. Disable only that disposable-image cleanup so the named archive
+    # volume can retain large CUDA and build-dependency packages across retries.
+    rm -f /etc/apt/apt.conf.d/docker-clean
+    printf '%s\n' \
+        'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
+        'Binary::apt-get::APT::Keep-Downloaded-Packages "true";' \
+        > /etc/apt/apt.conf.d/99immich-test-cache
     if ! id "$RUN_USER" >/dev/null 2>&1; then
         adduser --shell /bin/bash --disabled-password --gecos "Immich Mich" "$RUN_USER"
     fi
+    chown "$RUN_USER:$RUN_USER" "$RUN_USER_HOME"
     install -d -o "$RUN_USER" -g "$RUN_USER" \
         "$RUN_USER_HOME/build" \
         "$RUN_USER_HOME/.cache" \
+        "$RUN_USER_HOME/.local" \
+        "$RUN_USER_HOME/.local/share" \
+        "$RUN_USER_HOME/.local/share/pnpm" \
         "$RUN_USER_HOME/.local/share/pnpm/store" \
+        "$RUN_USER_HOME/.nvm" \
         "$RUN_USER_HOME/.nvm/.cache"
     chown -R "$RUN_USER:$RUN_USER" \
         "$RUN_USER_HOME/build" \
         "$RUN_USER_HOME/.cache" \
-        "$RUN_USER_HOME/.local/share/pnpm/store" \
-        "$RUN_USER_HOME/.nvm/.cache"
+        "$RUN_USER_HOME/.local" \
+        "$RUN_USER_HOME/.nvm"
 fi
 
 # Turn the mounted, possibly dirty workspace into a local committed remote so

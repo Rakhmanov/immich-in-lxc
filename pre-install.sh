@@ -4,7 +4,9 @@
 # Include helper functions
 # Such as git safe_git_checkout, choose_user
 # -------------------
-source "./helpers.sh"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=helpers.sh
+source "$SCRIPT_DIR/helpers.sh"
 
 
 # -------------------
@@ -50,7 +52,6 @@ check_supported_os () {
 # -------------------
 set_common_variables () {
     set -a
-    SCRIPT_DIR=$PWD
     REPO_URL="https://github.com/immich-app/base-images"
     APP_REPO_URL="https://github.com/immich-app/immich"
     THIS_REPO_URL="${THIS_REPO_URL:-https://github.com/Rakhmanov/immich-in-lxc.git}"

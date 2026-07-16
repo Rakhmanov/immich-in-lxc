@@ -9,6 +9,21 @@ cd "$REPO_DIR"
 
 bash -n helpers.sh pre-install.sh install.sh service-launch.sh
 
+# Absolute-path invocation and sourcing must not depend on the caller's cwd.
+# Persistent systemd-container orchestration commonly invokes the scripts from
+# `/` or another control directory rather than first changing into the checkout.
+(
+    cd /tmp
+    # shellcheck disable=SC1091
+    . "$REPO_DIR/pre-install.sh"
+    [[ "$SCRIPT_DIR" == "$REPO_DIR" ]]
+    declare -F safe_git_checkout >/dev/null
+    # shellcheck disable=SC1091
+    . "$REPO_DIR/install.sh"
+    [[ "$SCRIPT_DIR" == "$REPO_DIR" ]]
+    declare -F create_install_env_file >/dev/null
+)
+
 # The execution guards make the installer functions testable without running
 # package installation or touching the host.
 # shellcheck disable=SC1091
