@@ -53,6 +53,41 @@ FULL_INSTALL=1 CUDA_TEST=1 ./scripts/test-in-docker.sh
 
 This installs the guest CUDA runtime, selects Immich's CUDA ML dependencies, starts the real services, verifies the web API, and requires a real ONNX CUDA inference with CPU fallback disabled.
 
+To test an explicit Immich release without editing `example.env`, set
+`TEST_REPO_TAG`:
+
+```bash
+FULL_INSTALL=1 CUDA_TEST=1 TEST_REPO_TAG=v3.0.3 ./scripts/test-in-docker.sh
+```
+
+## Reusing download and source caches
+
+Long full-install retries can reuse Docker named volumes for native source
+checkouts plus the NVM, pnpm, and user download caches:
+
+```bash
+PERSISTENT_CACHE=1 FULL_INSTALL=1 CUDA_TEST=1 TEST_REPO_TAG=v3.0.3 \
+  ./scripts/test-in-docker.sh
+```
+
+Cache names are scoped by `TEST_OS` by default. Set `TEST_CACHE_SCOPE` to keep
+separate caches for another target, or `TEST_CACHE_PREFIX` to choose the exact
+Docker-volume prefix. The installer still performs clean native builds; these
+volumes avoid repeating source and package downloads.
+
+## Keeping a failed systemd container
+
+Set `KEEP_FAILED_CONTAINER=1` to retain the privileged systemd container after
+a failed test:
+
+```bash
+KEEP_FAILED_CONTAINER=1 FULL_INSTALL=1 ./scripts/test-in-docker.sh
+```
+
+The harness prints the unique container name and its removal command. Successful
+runs are always removed, and the short non-systemd smoke container remains
+disposable.
+
 ## Docker systemd requirements
 
 The systemd test needs privileged mode, the host cgroup namespace, and a writable `/sys/fs/cgroup` mount. The harness configures these automatically. If Docker itself is unavailable, it exits before changing the host.

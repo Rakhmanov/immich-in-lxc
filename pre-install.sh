@@ -731,6 +731,11 @@ build_libraw() {
     ../configure
     echo "Building libraw using $(nproc) threads"
     make -j"$(nproc)"
+    # Sharp is built later as the unprivileged service user. Do not let a
+    # restrictive umask inherited by pre-install.sh make these headers
+    # unsearchable (for example /usr/local/include/libraw mode 0700).
+    # Autotools honours the process umask while creating install directories.
+    umask 022
     make install
     ldconfig /usr/local/lib
 

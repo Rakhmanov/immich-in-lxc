@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 IMAGE="immich-in-lxc-smoke:${TEST_OS:-ubuntu-24.04}"
 CONTAINER="immich-in-lxc-systemd-smoke-$$"
+KEEP_FAILED_CONTAINER="${KEEP_FAILED_CONTAINER:-0}"
+PERSISTENT_CACHE="${PERSISTENT_CACHE:-0}"
 
 if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
     echo "Docker Engine is unavailable. In WSL2, enable Docker Desktop integration for this distribution and retry." >&2
@@ -12,6 +14,14 @@ if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
 fi
 
 cleanup() {
+    local status=$?
+
+    if [[ "$status" -ne 0 && "$KEEP_FAILED_CONTAINER" == 1 ]] \
+        && docker inspect "$CONTAINER" >/dev/null 2>&1; then
+        echo "Test failed; keeping container for inspection: $CONTAINER" >&2
+        echo "Remove it when finished: docker rm -f $CONTAINER" >&2
+        return
+    fi
     docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -30,14 +40,38 @@ docker run --rm \
 
 echo "Booting a privileged container with systemd as PID 1..."
 gpu_args=()
+container_args=()
 if [[ "${CUDA_TEST:-0}" == 1 ]]; then
-    gpu_args+=(--runtime=nvidia --gpus all -e TEST_CUDA=1)
+    # Newer Docker/NVIDIA setups expose GPUs through device requests while
+    # retaining the default runc runtime. Keep legacy hosts working without
+    # forcing --runtime=nvidia on CDI-based hosts such as raxx.
+    if docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"'; then
+        gpu_args+=(--runtime=nvidia)
+    fi
+    gpu_args+=(--gpus all -e TEST_CUDA=1)
+fi
+if [[ -n "${TEST_REPO_TAG:-}" ]]; then
+    container_args+=(-e "TEST_REPO_TAG=$TEST_REPO_TAG")
+fi
+if [[ "$PERSISTENT_CACHE" == 1 ]]; then
+    cache_scope="${TEST_CACHE_SCOPE:-${TEST_OS:-ubuntu-24.04}}"
+    cache_scope="${cache_scope//[^a-zA-Z0-9_.-]/-}"
+    cache_prefix="${TEST_CACHE_PREFIX:-immich-in-lxc-test-$cache_scope}"
+    container_args+=(
+        -e TEST_PERSISTENT_CACHE=1
+        -v "$cache_prefix-build:/home/immich/build"
+        -v "$cache_prefix-user-cache:/home/immich/.cache"
+        -v "$cache_prefix-pnpm-store:/home/immich/.local/share/pnpm/store"
+        -v "$cache_prefix-nvm-cache:/home/immich/.nvm/.cache"
+    )
+    echo "Using persistent test caches with prefix: $cache_prefix"
 fi
 docker run -d \
     --name "$CONTAINER" \
     --privileged \
     --cgroupns=host \
     "${gpu_args[@]}" \
+    "${container_args[@]}" \
     --tmpfs /run \
     --tmpfs /run/lock \
     -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
