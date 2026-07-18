@@ -86,6 +86,10 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
 
     client_max_body_size 0;
+    client_body_buffer_size 1024k;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
+    send_timeout 600s;
 
     location / {
         proxy_pass http://127.0.0.1:2283;
@@ -101,6 +105,10 @@ server {
     }
 }
 ```
+
+The default 60s proxy timeout is too short for large or slow uploads and will drop the
+connection mid-transfer — the mobile app reports this as `unexpected end of stream`. The
+`proxy_read_timeout`/`proxy_send_timeout`/`send_timeout` above raise that to 10 minutes.
 
 Enable and validate it:
 
