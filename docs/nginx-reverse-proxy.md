@@ -122,3 +122,17 @@ systemctl reload nginx
 Open `https://immich.example.com` and verify login, upload, and a large video transfer. If another site already owns ports 80 or 443, integrate the `location` block into that proxy instead of starting a second listener.
 
 The certificate lifecycle is intentionally outside this installer. mkcert and self-signed certs above don't renew themselves — re-run the same command before they expire, or switch to certbot if that becomes a chore.
+
+## Troubleshooting: upload fails with "unexpected end of stream"
+
+If the mobile app's server endpoint is set to `http://` instead of `https://`, every request
+hits the port-80 listener first and gets 308-redirected to https. Small metadata calls survive
+that (tiny or empty body, trivially re-sent), but a large streaming upload doesn't — the app
+consumes the upload stream on the first attempt and has nothing left to send when it retries
+against the redirect target, killing the connection mid-transfer.
+
+Fix the endpoint in the app to `https://` if you can. If you can't (some app builds don't expose
+that setting, or it's pinned elsewhere), drop the redirect instead and serve the app directly on
+port 80 too, by copying the `client_max_body_size`/`proxy_*`/`location` block from the `443`
+server into the `80` server in place of the `return 308 ...` line. This removes the forced-HTTPS
+default, so only do it on a trusted LAN where that trade-off is acceptable.
