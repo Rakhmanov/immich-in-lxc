@@ -6,7 +6,7 @@ This example assumes:
 
 - the public name is `immich.example.com`;
 - Nginx runs in the same guest as Immich; and
-- a certificate and private key already exist at `/etc/nginx/ssl/immich.pem` and `/etc/nginx/ssl/immich-key.pem`.
+- a certificate and private key exist at `/etc/nginx/ssl/immich.pem` and `/etc/nginx/ssl/immich-key.pem`.
 
 Replace the example name and certificate paths with real values.
 
@@ -26,6 +26,43 @@ Copy the certificate and key into `/etc/nginx/ssl`, owned by root. Restrict the 
 chown root:root /etc/nginx/ssl/immich.pem /etc/nginx/ssl/immich-key.pem
 chmod 0644 /etc/nginx/ssl/immich.pem
 chmod 0600 /etc/nginx/ssl/immich-key.pem
+```
+
+## Get a certificate
+
+Pick whichever matches how you'll reach `immich.example.com`.
+
+**LAN-only / self-hosted, no public DNS** — use [mkcert](https://github.com/FiloSottile/mkcert)
+so clients trust the cert without a browser warning:
+
+```bash
+apt-get install -y libnss3-tools
+curl -JLO https://dl.filippo.io/mkcert/latest?for=linux/amd64
+install -m 0755 mkcert-v*-linux-amd64 /usr/local/bin/mkcert
+mkcert -install                       # generates and trusts a local CA
+mkcert -cert-file /etc/nginx/ssl/immich.pem -key-file /etc/nginx/ssl/immich-key.pem immich.example.com
+```
+
+The local CA (`mkcert -CAROOT`) needs installing on every client device too, or they'll still
+show untrusted.
+
+**Quick and dirty, browser warning expected** — a self-signed cert, no CA involved:
+
+```bash
+openssl req -x509 -nodes -days 825 -newkey rsa:2048 \
+  -keyout /etc/nginx/ssl/immich-key.pem \
+  -out /etc/nginx/ssl/immich.pem \
+  -subj "/CN=immich.example.com"
+```
+
+**Public domain with real DNS** — use [certbot](https://certbot.eff.org/) instead of a
+manually-generated cert, and point it at the same two paths, or update `ssl_certificate`/
+`ssl_certificate_key` below to certbot's `/etc/letsencrypt/live/immich.example.com/` output.
+Certbot also handles renewal; the two manual options above do not.
+
+```bash
+apt-get install -y certbot python3-certbot-nginx
+certbot --nginx -d immich.example.com
 ```
 
 ## Configure the site
@@ -76,4 +113,4 @@ systemctl reload nginx
 
 Open `https://immich.example.com` and verify login, upload, and a large video transfer. If another site already owns ports 80 or 443, integrate the `location` block into that proxy instead of starting a second listener.
 
-The certificate lifecycle is intentionally outside this installer. Renew or replace certificates using the mechanism appropriate for your DNS and network.
+The certificate lifecycle is intentionally outside this installer. mkcert and self-signed certs above don't renew themselves — re-run the same command before they expire, or switch to certbot if that becomes a chore.
