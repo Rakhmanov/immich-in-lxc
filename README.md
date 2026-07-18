@@ -189,6 +189,7 @@ If either service fails, do not repeatedly rerun the installer. Capture the logs
 - [Storage and filesystem layout](docs/storage-and-layout.md) — mounted disks, local SSD thumbnails, permissions, and what must be backed up
 - [Hardware acceleration](docs/hardware-acceleration.md) — NVIDIA CUDA, AMD ROCm, Intel OpenVINO, and transcoding
 - [Nginx reverse proxy](docs/nginx-reverse-proxy.md) — HTTPS termination and forwarding to port `2283`
+- [Backup: originals-only to Backblaze B2 via restic](docs/backup-restic-backblaze.md) — skip regenerable thumbnails/transcodes, back up only originals and the DB dumps
 - [Native installer in a persistent systemd container](docs/native-systemd-container.md) — supported guest userspace on an otherwise unsupported host, persistence, worker-safe staging, and migration boundaries
 - [Troubleshooting and recovery](docs/troubleshooting-and-recovery.md) — logs, health checks, Debian repository recovery, and older database migrations
 - [Testing](docs/testing.md) — fast, full, systemd, Debian 13, and real CUDA Docker tests
