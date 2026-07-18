@@ -68,10 +68,10 @@ jobs:
             }
             
             # Test specific required functions exist
-            grep -q "git_clone[[:space:]]*()" pre-install.sh && {
-              echo "✅ git_clone function definition found"
+            grep -q "safe_git_checkout[[:space:]]*()" helpers.sh && {
+              echo "✅ safe_git_checkout function definition found"
             } || {
-              echo "❌ git_clone function not found"
+              echo "❌ safe_git_checkout function not found"
               exit 1
             }
             
@@ -128,13 +128,14 @@ jobs:
           
           # Create a modified version of the script without the change_locale call
           cp pre-install.sh pre-install-modified.sh
-          sed -i '/^change_locale$/d' pre-install-modified.sh
+          sed -i '/^[[:space:]]*change_locale[[:space:]]*$/d' pre-install-modified.sh
           
           # Track build status
           BUILD_SUCCESS=false
           
           # Run the modified pre-install script with timeout
-          if timeout $BUILD_TIMEOUT bash pre-install-modified.sh; then
+          if USER_PASSWORD='ci-user-password' DB_PASSWORD='ci-db-password' \
+            timeout $BUILD_TIMEOUT bash pre-install-modified.sh; then
             echo "✅ Full build test completed successfully"
             BUILD_SUCCESS=true
           else
@@ -197,10 +198,10 @@ jobs:
               exit 1
             }
             
-            grep -q "Git clone function" pre-install.sh && {
-              echo "✅ Script has git clone function"
+            grep -q "safe_git_checkout" helpers.sh && {
+              echo "✅ Script has checkout helper"
             } || {
-              echo "❌ Missing git clone function"
+              echo "❌ Missing checkout helper"
               exit 1
             }
             
@@ -237,4 +238,4 @@ jobs:
           echo "File checks:"
           ls -la pre-install.sh dep-*.sh || echo "Some dependency files missing"
           
-          echo "✅ Test report generated" 
+          echo "✅ Test report generated"

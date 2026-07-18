@@ -4,11 +4,23 @@ on:
   push:
     paths:
       - 'pre-install.sh'
+      - 'install.sh'
+      - 'helpers.sh'
+      - 'service-launch.sh'
+      - 'example.env'
+      - 'tests/**'
+      - 'scripts/test-in-docker.sh'
       - 'dep-*.sh'
       - '.github/workflows/test-pre-install.yaml'
   pull_request:
     paths:
       - 'pre-install.sh'
+      - 'install.sh'
+      - 'helpers.sh'
+      - 'service-launch.sh'
+      - 'example.env'
+      - 'tests/**'
+      - 'scripts/test-in-docker.sh'
       - 'dep-*.sh'
       - '.github/workflows/test-pre-install.yaml'
 
@@ -63,13 +75,10 @@ jobs:
             }
             
             # Test specific required functions exist
-            grep -q "git_clone[[:space:]]*()" pre-install.sh && {
-              echo "✅ git_clone function definition found"
-            } || {
-              echo "❌ git_clone function not found"
-              exit 1
-            }
-            
+            grep -q "setup_immich_database[[:space:]]*()" pre-install.sh
+            grep -q "copy_service_files[[:space:]]*()" pre-install.sh
+            grep -q "safe_git_checkout[[:space:]]*()" helpers.sh
+
             grep -q "remove_build_folder[[:space:]]*()" pre-install.sh && {
               echo "✅ remove_build_folder function definition found"
             } || {
@@ -90,16 +99,15 @@ jobs:
             fi
             
             echo "✅ Basic script structure validation passed"
-          ' || {
-            echo "⚠️ Script validation completed (build process not fully tested to save time)"
-            exit 0
-          }
+          '
+
+          ./tests/container-smoke.sh non-systemd
 
   test-debian:
-    name: Test on Debian 12
+    name: Test on Debian 13
     runs-on: ubuntu-latest
     container:
-      image: debian:12
+      image: debian:13
       options: --privileged
     steps:
       - name: Checkout code
@@ -145,13 +153,10 @@ jobs:
             }
             
             # Test specific required functions exist
-            grep -q "git_clone[[:space:]]*()" pre-install.sh && {
-              echo "✅ git_clone function definition found"
-            } || {
-              echo "❌ git_clone function not found"
-              exit 1
-            }
-            
+            grep -q "setup_immich_database[[:space:]]*()" pre-install.sh
+            grep -q "copy_service_files[[:space:]]*()" pre-install.sh
+            grep -q "safe_git_checkout[[:space:]]*()" helpers.sh
+
             grep -q "remove_build_folder[[:space:]]*()" pre-install.sh && {
               echo "✅ remove_build_folder function definition found"
             } || {
@@ -172,10 +177,9 @@ jobs:
             fi
             
             echo "✅ Basic script structure validation passed"
-          ' || {
-            echo "⚠️ Script validation completed (build process not fully tested to save time)"
-            exit 0
-          }
+          '
+
+          ./tests/container-smoke.sh non-systemd
 
   syntax-check:
     name: Syntax Check
@@ -189,6 +193,9 @@ jobs:
           # Check syntax of all shell scripts
           echo "Checking syntax of pre-install.sh..."
           bash -n pre-install.sh
+
+          echo "Checking syntax of install and helper scripts..."
+          bash -n install.sh helpers.sh service-launch.sh tests/container-smoke.sh tests/full-install-smoke.sh scripts/test-in-docker.sh
           
           echo "Checking syntax of dep-ubuntu.sh..."
           bash -n dep-ubuntu.sh
@@ -229,22 +236,15 @@ jobs:
           if command -v shellcheck >/dev/null 2>&1; then
             echo "🔍 Running shellcheck linting..."
             
-            # Lint all shell scripts
-            echo "Linting pre-install.sh..."
-            shellcheck pre-install.sh || echo "⚠️ Shellcheck warnings found in pre-install.sh"
-            
-            echo "Linting dep-ubuntu.sh..."
-            shellcheck dep-ubuntu.sh || echo "⚠️ Shellcheck warnings found in dep-ubuntu.sh"
-            
-            echo "Linting dep-debian.sh..."
-            shellcheck dep-debian.sh || echo "⚠️ Shellcheck warnings found in dep-debian.sh"
-            
-            echo "Linting dep-intel.sh..."
-            shellcheck dep-intel.sh || echo "⚠️ Shellcheck warnings found in dep-intel.sh"
+            # Fail on ShellCheck errors across all installer scripts. The
+            # legacy scripts still have lower-severity cleanup warnings.
+            shellcheck --severity=error helpers.sh pre-install.sh install.sh service-launch.sh \
+              dep-ubuntu.sh dep-debian.sh dep-intel.sh \
+              tests/container-smoke.sh tests/full-install-smoke.sh scripts/test-in-docker.sh
             
             echo "✅ Shell script linting completed"
           else
             echo "❌ Shellcheck not available, skipping linting"
             exit 1
 
-          fi 
+          fi

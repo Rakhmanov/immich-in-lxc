@@ -4,7 +4,9 @@
 # Include helper functions
 # Such as git git_checkout_repo
 # -------------------
-source "./helpers.sh"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=helpers.sh
+source "$SCRIPT_DIR/helpers.sh"
 
 
 # -------------------
@@ -53,8 +55,6 @@ check_user_id () {
 # -------------------
 # Create env file if it does not exists
 # -------------------
-SCRIPT_DIR=$PWD
-
 create_install_env_file () {
     # Check if env file exists
     if [ ! -f $SCRIPT_DIR/.env ]; then
@@ -91,6 +91,11 @@ set_common_variables () {
     TMP_DIR=/tmp/$(whoami)/immich-in-lxc/
     REPO_URL="https://github.com/immich-app/immich"
     NODE_OPTIONS="--max-old-space-size=8192"
+    # Shared with pre-install.sh so we don't clone base-images twice.
+    # $HOME here is the run-user's home (install.sh runs as $RUN_USER).
+    RUN_USER_BUILD_DIR="$HOME/build"
+    BASE_IMG_REPO_DIR="$RUN_USER_BUILD_DIR/base-images"
+    DB_PASSWORD_FILE="${DB_PASSWORD_FILE:-$HOME/.config/immich-in-lxc/db-password}"
     set +a
 }
 
@@ -136,14 +141,15 @@ install_node () {
         echo "Finish installing latest LTS node"
     fi
 
-    if ! command -v pnpm &> /dev/null; then
-        echo "Installing pnpm"
-        npm install -g pnpm@10
+    if ! command -v corepack &> /dev/null; then
+        echo "Installing Corepack"
+        npm install -g corepack@latest
     fi
+    corepack enable pnpm
     echo ------------------Current versions------------------
     echo "npm version: {$(npm -v)}"
     echo "node version: {$(node -v)}"
-    echo "pnpm version: {$(pnpm -v)}"
+    echo "corepack version: {$(corepack -v)}"
     echo
 }
 
@@ -248,8 +254,11 @@ mise_local_override() {
 disable_tools = [
   "flutter",
   "java",
+  "node",
+  "pnpm",
   "opentofu",
-  "terragrunt"
+  "terragrunt",
+  "github:jellyfin/jellyfin-ffmpeg"
 ]
 EOF
 
@@ -264,25 +273,33 @@ install_immich_web_server_pnpm () {
 
     # Set mirror for pnpm (if needed)
     if [ ! -z "${PROXY_NPM}" ]; then
-        pnpm config set registry=$PROXY_NPM
+        corepack pnpm config set registry=$PROXY_NPM
     fi
 
     # Install dependencies
-    pnpm install --frozen-lockfile
+    corepack pnpm install --frozen-lockfile
+    echo "pnpm version selected from package.json: $(corepack pnpm -v)"
 
-    # Use global LibVips - happens by default no flags needed
-    pnpm --filter immich --frozen-lockfile build
+    # Immich v3 added @immich/plugin-sdk as a server build dependency.
+    if [ -f "packages/plugin-sdk/package.json" ]; then
+        SHARP_IGNORE_GLOBAL_LIBVIPS=true corepack pnpm \
+            --filter @immich/sdk --filter @immich/plugin-sdk --filter immich build
+    else
+        corepack pnpm --filter immich build
+    fi
 
     # Build SDK
-    pnpm --filter @immich/sdk --filter immich-web --frozen-lockfile build
+    corepack pnpm --filter @immich/sdk --filter immich-web build
 
     # Build and deploy the server component.
-    pnpm --filter immich --prod deploy "$INSTALL_DIR_app"
-    # Rebuild sharp again that it links correctly against global
-    (cd $INSTALL_DIR_app; pnpm add sharp --allow-build=sharp; pnpm rebuild sharp)
+    corepack pnpm --filter immich --prod deploy "$INSTALL_DIR_app"
+    # sharp was compiled against the global libvips during the frozen workspace
+    # install. Do not mutate the deployed v3 lockfile: its injected workspace
+    # dependency snapshots are not valid standalone `pnpm add` resolver input.
 
     # Build and deploy the CLI.
-    pnpm --filter @immich/cli --frozen-lockfile --prod --no-optional deploy $INSTALL_DIR_app/cli
+    corepack pnpm --filter @immich/sdk --filter @immich/cli build
+    corepack pnpm --filter @immich/cli --prod --no-optional deploy $INSTALL_DIR_app/cli
 
     ln -s ../cli/bin/immich $INSTALL_DIR_app/bin/immich
 
@@ -293,13 +310,21 @@ install_immich_web_server_pnpm () {
     cp -a i18n $INSTALL_DIR/
     cp -a server/bin/get-cpus.sh server/bin/start.sh $INSTALL_DIR_app/
 
-    # Build plugins v2.3.0 +
+    # Build the bundled plugin. Immich v3 moved it into packages/plugin-core
+    # and changed the runtime path to /build/plugins/immich-plugin-core.
     npm install -g @jdxcode/mise
 
-    if [ -d "plugins" ]; then
+    if [ -d "packages/plugin-core" ]; then
+        mise trust --all --yes
+        mise //:plugins
+
+        mkdir -p "$INSTALL_DIR_app/plugins/immich-plugin-core/dist"
+        cp -a ./packages/plugin-core/dist/. "$INSTALL_DIR_app/plugins/immich-plugin-core/dist/"
+        cp -a ./packages/plugin-core/manifest.json "$INSTALL_DIR_app/plugins/immich-plugin-core/manifest.json"
+    elif [ -d "plugins" ]; then
         (
             cd plugins
-            pnpm install
+            corepack pnpm install
             mise trust --all --yes
             mise build
         )
@@ -309,12 +334,12 @@ install_immich_web_server_pnpm () {
         cp -a ./plugins/dist/. "$INSTALL_DIR_app/corePlugin/dist/"
         cp -a ./plugins/manifest.json "$INSTALL_DIR_app/corePlugin/manifest.json"
     else
-        echo "plugins directory not found — skipping plugin build."
+        echo "Bundled plugin source not found — skipping plugin build."
     fi
 
     # Unset mirror for pnpm (if it was set)
     if [ ! -z "${PROXY_NPM}" ]; then
-        pnpm config delete registry
+        corepack pnpm config delete registry
     fi
 }
 
@@ -331,16 +356,21 @@ generate_build_lock () {
 
     tag=$(grep -oP '(?<=immich-app/base-server-dev:)[0-9]+' $INSTALL_DIR_src/server/Dockerfile)
 
-    if [ -d base-images/.git ]; then
-        echo "Updating existing base-images repo..."
-        git -C base-images fetch --tags
-        git -C base-images checkout "$tag" || git -C base-images fetch origin "refs/tags/$tag:refs/tags/$tag" && git -C base-images checkout "$tag"
+    # Reuse the tree pre-install.sh populated under $HOME/build/base-images.
+    # safe_git_checkout is idempotent — if the directory is missing (e.g.
+    # install.sh is being run without pre-install.sh), it will clone fresh.
+    mkdir -p "$(dirname "$BASE_IMG_REPO_DIR")"
+
+    if [ -d "$BASE_IMG_REPO_DIR/.git" ]; then
+        echo "Updating existing base-images repo at $BASE_IMG_REPO_DIR..."
+        git -C "$BASE_IMG_REPO_DIR" fetch --tags
+        git -C "$BASE_IMG_REPO_DIR" checkout "$tag" || git -C "$BASE_IMG_REPO_DIR" fetch origin "refs/tags/$tag:refs/tags/$tag" && git -C "$BASE_IMG_REPO_DIR" checkout "$tag"
     else
-        echo "Cloning fresh base-images repo at tag $tag..."
-        safe_git_checkout "$REPO_URL_BASE_IMG" . "$tag"
+        echo "Cloning fresh base-images repo at tag $tag into $BASE_IMG_REPO_DIR..."
+        safe_git_checkout "$REPO_URL_BASE_IMG" "$BASE_IMG_REPO_DIR" "$tag"
     fi
 
-    cd base-images/server/
+    cd "$BASE_IMG_REPO_DIR/server/"
 
     # From base-images/server/Dockerfile line 110
     jq -s '.' packages/*.json > $TMP_DIR/packages.json
@@ -511,18 +541,42 @@ EOF
 # -------------------
 
 create_runtime_env_file () {
-    cd $INSTALL_DIR
+    local escaped_password runtime_env_link
+
+    mkdir -p "$INSTALL_DIR"
+    cd "$INSTALL_DIR"
+    if [ ! -s "$DB_PASSWORD_FILE" ]; then
+        echo "Database password file not found: $DB_PASSWORD_FILE" >&2
+        echo "Run pre-install.sh first or set DB_PASSWORD_FILE in .env." >&2
+        exit 1
+    fi
+
     # Check if env file exists
     if [ ! -f runtime.env ]; then
         # If not, create a new one based on the template
         if [ -f $SCRIPT_DIR/runtime.env ]; then
-            cp $SCRIPT_DIR/runtime.env runtime.env
-            echo "New runtime.env file created from the template, exiting"
+            cp "$SCRIPT_DIR/runtime.env" runtime.env
+            sed -i "s|^MACHINE_LEARNING_CACHE_FOLDER=.*|MACHINE_LEARNING_CACHE_FOLDER=$INSTALL_DIR/ml-models|" runtime.env
+            echo "New secure runtime.env file created from the template"
         else
             echo "runtime.env not found, please clone the entire repo, exiting"
             exit 1
         fi
     fi
+
+    # Keep an existing runtime file synchronized if pre-install rotated the
+    # database password, while preserving every other user-managed setting.
+    IFS= read -r DB_PASSWORD < "$DB_PASSWORD_FILE"
+    escaped_password="$(shell_env_escape "$DB_PASSWORD")"
+    replace_key_value_line runtime.env DB_PASSWORD "$escaped_password"
+    chmod 0600 runtime.env
+
+    # Give systemd a stable EnvironmentFile path even when INSTALL_DIR is a
+    # custom mount. The link and its parent stay private to the service user.
+    runtime_env_link="$HOME/.config/immich-in-lxc/runtime.env"
+    mkdir -p "$(dirname "$runtime_env_link")"
+    chmod 0700 "$(dirname "$runtime_env_link")"
+    ln -sfn "$INSTALL_DIR/runtime.env" "$runtime_env_link"
 }
 
 
@@ -550,37 +604,43 @@ confirm_destruction() {
     return 0
 }
 
-set -euo pipefail
-# set -x # Print each command (Debugging)
+main() {
+    set -euo pipefail
+    # set -x # Print each command (Debugging)
 
-check_user_id
-check_services_off
-create_install_env_file
-load_environment_variables
-set_common_variables
-review_install_information
+    check_user_id
+    check_services_off
+    create_install_env_file
+    load_environment_variables
+    set_common_variables
+    review_install_information
+    create_runtime_env_file
 
-install_node
-review_dependency
-clean_previous_build
-create_folders
-safe_git_checkout "$REPO_URL" "$INSTALL_DIR_src" "$REPO_TAG"
-mise_local_override
-git_patch
-install_immich_web_server_pnpm
-generate_build_lock
-install_immich_machine_learning
-replace_usr_src
-setup_upload_folder
-download_geonames
-create_custom_start_script
-create_runtime_env_file
+    install_node
+    review_dependency
+    clean_previous_build
+    create_folders
+    safe_git_checkout "$REPO_URL" "$INSTALL_DIR_src" "$REPO_TAG"
+    mise_local_override
+    git_patch
+    install_immich_web_server_pnpm
+    generate_build_lock
+    install_immich_machine_learning
+    replace_usr_src
+    setup_upload_folder
+    download_geonames
+    create_custom_start_script
 
-echo "----------------------------------------------------------------"
-echo "Installation/Upgrade Completed"
-echo "----------------------------------------------------------------"
-echo "If this was first intallation - run post-install.sh."
-echo "./post-install.sh"
-echo "----------------------------------------------------------------"
-echo "If this was an update, restart the services (as root):"
-echo "systemctl restart immich-web immich-ml"
+    echo "----------------------------------------------------------------"
+    echo "Installation/Upgrade Completed"
+    echo "----------------------------------------------------------------"
+    echo "If this was a first installation, review $INSTALL_DIR/runtime.env if needed."
+    echo "Then start the services (as root):"
+    echo "systemctl daemon-reload"
+    echo "systemctl start immich-ml immich-web"
+    echo "systemctl enable immich-ml immich-web"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
